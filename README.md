@@ -1,6 +1,6 @@
-# so-lite-agent
+# so-lite-agent（SL Agent）
 
-开箱即用的通用 Agent 运行时：`cargo add so-lite-agent` 后即可上手开发自己的 Agent。
+开箱即用的通用 Agent 运行时（官方简写 **SL Agent**，另一种写法 **So Lite Agent**）：`cargo add so-lite-agent` 后即可上手开发自己的 Agent。
 
 参考 [earendil-works/pi](https://github.com/earendil-works/pi) 的分层——模型 Provider 层（pi-ai 等价物）与 Agent core 层（pi-agent-core 等价物）内置随包，领域层（业务插件）由使用方编写。mistake-agent 是本仓库的参考实现与消费方（保持独立，不做 M1 解耦，见 [ADR-0001](docs/adr/0001-independent-repo-skip-m1.md)）。
 

@@ -2,6 +2,12 @@
 
 通用 Agent 运行时的领域词汇：模型 Provider 抽象、Agent loop、插件契约、会话与消息树。
 
+## 命名
+
+**SL Agent（官方简写）**:
+so-lite-agent 的官方简写；另一种写法是 **So Lite Agent**。文档、标题与口头交流优先用 SL Agent；代码与包名仍是 `so-lite-agent` / `so_lite_agent`，不因简写改动。
+_Avoid_: SLA、LiteAgent、SL-Agent（连字符变体）
+
 ## 运行时结构
 
 **Agent loop（Agent 循环）**:
