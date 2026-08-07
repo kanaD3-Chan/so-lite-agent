@@ -30,6 +30,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
 默认装配：`InMemorySessionStore` + `MockModelService`（固定文本桩）+ `MemoryEventSink` + `MemoryAuditSink`，不配任何东西也能跑通 hello 回合。真实模型 Provider（OpenAI 兼容 / Anthropic 兼容 / 自定义端点）在 M3 提供。
 
+## 开发上手
+
+- 先跑 [examples/hello.rs](examples/hello.rs)：最小内核 + hello 回合；
+- 再跑 [examples/plugins.rs](examples/plugins.rs)：自定义服务 + 内核插件 + 用户插件端到端（脚本化模型模拟两次工具调用）；
+- 插件怎么下手：见 [docs/plugin-dev.md](docs/plugin-dev.md)。
+
 ## 模块一页
 
 | 模块 | 职责 |
