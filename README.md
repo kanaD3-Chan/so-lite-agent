@@ -70,7 +70,7 @@ Anthropic 兼容端点用 `AnthropicModelService`；自定义端点就是改 `ap
 
 | 阶段 | 内容 | 状态 |
 |---|---|---|
-| M2 | 新仓库骨架：通用模块 + 默认服务，hello 回合（mock） | 🟡 进行中（骨架完成，待评审） |
+| M2 | 新仓库骨架：通用模块 + 默认服务，hello 回合（mock） | ✅（评审通过：消费者实测 + 门禁全绿） |
 | M3 | Provider 层：内置适配器 + register_provider | ✅（真实 API 验收通过） |
 | M4 | 通用 RPC + KernelBuilder 定型；插件手册/参考模板迁移 | ✅ |
 | M5 | 发布与切换（crates.io 上架除外） | ⏸ 推迟：切换留待 v3 评估 |
