@@ -47,6 +47,13 @@ pub enum Event {
     Error {
         message: String,
     },
+    /// 业务事件扩展口：内核插件/使用方上浮自定义事件（与 [`crate::rpc::Method::Custom`] 对称）。
+    /// kernel 不解析 name/payload，只负责运输；前端按 name 匹配处理。
+    Custom {
+        name: String,
+        #[serde(default)]
+        payload: serde_json::Value,
+    },
 }
 
 /// 事件消费者：非 async、fire-and-forget。
@@ -69,5 +76,27 @@ impl MemoryEventSink {
 impl EventSink for MemoryEventSink {
     fn emit(&self, event: Event) {
         self.events.lock().expect("sink poisoned").push(event);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn custom_event_round_trip() {
+        let event = Event::Custom {
+            name: "iot.alert".into(),
+            payload: serde_json::json!({"device": "env_sensor", "value": 33.0}),
+        };
+        let json = serde_json::to_string(&event).unwrap();
+        let back: Event = serde_json::from_str(&json).unwrap();
+        match back {
+            Event::Custom { name, payload } => {
+                assert_eq!(name, "iot.alert");
+                assert_eq!(payload["value"], 33.0);
+            }
+            other => panic!("应反序列化为 Custom：{other:?}"),
+        }
     }
 }
