@@ -34,4 +34,4 @@
 ## M5：发布与切换
 
 - 决策（2026-08-07）：**crates.io 上架除外**，仅做消费切换；
-- 🟡 mistake-agent 切到新 crate 消费并删除重复代码（届时才改 mistake-agent），双端回归通过——待评估启动。
+- 🟡 mistake-agent 切到新 crate 消费并删除重复代码（届时才改 mistake-agent），双端回归通过——方案见 [docs/m5-switchover.md](m5-switchover.md)，待启动。
