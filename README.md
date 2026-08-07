@@ -50,6 +50,7 @@ Anthropic 兼容端点用 `AnthropicModelService`；自定义端点就是改 `ap
 
 - 先跑 [examples/hello.rs](examples/hello.rs)：最小内核 + hello 回合；
 - 再跑 [examples/plugins.rs](examples/plugins.rs)：自定义服务 + 内核插件 + 用户插件端到端（脚本化模型模拟两次工具调用）；
+- 目录编排见 [examples/folder_plugins](examples/folder_plugins/main.rs)：一插件一目录（mod.rs 契约 + core.rs 实现）+ 聚合点；
 - 插件怎么下手：见 [docs/plugin-dev.md](docs/plugin-dev.md)。
 
 ## 模块一页

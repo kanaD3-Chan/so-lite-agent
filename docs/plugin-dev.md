@@ -82,6 +82,39 @@ impl UserPlugin for StudyPlugin {
 
 注意：插件只写**短名**（`remind`），kernel 拼全名（`study::remind`），模型看到的是 wire name（`study__remind`）。
 
+## 目录编排（推荐约定）
+
+契约与代码放哪无关，但推荐**一插件一目录**（沿用 mistake-agent 的组织风格，不含它的编译期发现语义）：
+
+```text
+src/
+├── plugins/
+│   ├── mod.rs              ← 聚合点：每个插件一行显式注册
+│   ├── study/
+│   │   ├── mod.rs          ← 两段式契约：info() + register() + descriptor()
+│   │   └── core.rs         ← handler 绑定与业务逻辑
+│   └── kernel_notes/
+│       ├── mod.rs
+│       └── core.rs
+└── notes.rs                ← 共享业务服务（trait + 实现 + ServiceId）
+```
+
+```rust
+// plugins/mod.rs 聚合点（唯一显式清单）
+pub mod kernel_notes;
+pub mod study;
+```
+
+```rust
+// 装配处
+.register_kernel_plugin(PluginDescriptor::from_plugin::<plugins::kernel_notes::NotesKernelPlugin>())
+.register_plugin(PluginDescriptor::from_plugin::<plugins::study::StudyPlugin>())
+```
+
+禁用插件 = 从聚合点删掉那一行（或 feature flag 条件编译），不需要 `disabled` 标记文件——那是 mistake-agent 编译期 include! 聚合的配套，这里注册是显式的。
+
+完整可运行示例：[examples/folder_plugins](../examples/folder_plugins/main.rs)（study/ 用户插件 + kernel_notes/ 内核插件 + 共享 notes.rs）。
+
 ## 内核插件（特权入口）
 
 内核插件在信任边界内：register 拿到**全量**句柄，可注册需要特权的入口（如记忆路由、验算、会话切换）。
