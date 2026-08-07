@@ -34,6 +34,8 @@ KernelBuilder::new().register_kernel_plugin(desc);
 - **注册时**（`build()` / `register_*_plugin` 调用）：只校验 `info()` 的声明——namespace/wire 唯一、`requires` 可满足、`provides` 不重复、用户插件不得 provides；
 - **加载时**（默认懒加载，首次命中入口点才执行）：调用 `register(ctx)` 绑定 handler；`info().load = LoadPolicy::Eager` 可改为注册时立即绑定。
 
+**为什么不用宏/自动发现**：注册保持**显式链式调用**（`register_plugin` / `register_kernel_plugin` 各一行），延续 mistake-agent 的显式装配设计（对应其 ADR-0036 的结论）。曾评估过两类替代：属性宏 + 一次聚合（仍需显式清单，收益有限）与 `inventory`/`linkme` 链接期自动收集（最接近 Python 装饰器，但引入隐式全局注册表、平台坑，且破坏 build 时 fail-fast 的可预期性）——均被否。以后若想减少样板，加宏是纯增量、不破坏现有 API。
+
 用户插件与内核插件对照：
 
 | | 用户插件 | 内核插件 |
