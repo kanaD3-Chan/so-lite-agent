@@ -11,6 +11,40 @@
 
 注册表在启动时 fail-fast 校验：namespace/wire 撞名、`requires` 服务缺失、重复 `provides`、用户插件声明 `provides`，都会让 `build()` 直接失败。
 
+## 注册流程：trait 是契约，描述符才是注册
+
+实现 `UserPlugin` / `KernelPlugin` 只是**定义契约**，插件不会因此自动出现；必须把描述符显式交给注册表：
+
+```rust
+// 用户插件
+let desc = PluginDescriptor::from_plugin::<StudyPlugin>();
+KernelBuilder::new().register_plugin(desc);
+// 等价：registry.register_plugin(desc)
+
+// 内核插件
+let desc = KernelDescriptor::from_plugin::<NotesKernelPlugin>();
+KernelBuilder::new().register_kernel_plugin(desc);
+// 等价：registry.register_kernel_plugin(desc)
+```
+
+`from_plugin::<P>()` 把 `P::info()`（静态声明）和 `P::register`（绑定函数指针）打包成一个描述符；插件本身不需要实例、不持有状态，状态都在 register 阶段捕获的 Arc 句柄里。
+
+两段式的时间点：
+
+- **注册时**（`build()` / `register_*_plugin` 调用）：只校验 `info()` 的声明——namespace/wire 唯一、`requires` 可满足、`provides` 不重复、用户插件不得 provides；
+- **加载时**（默认懒加载，首次命中入口点才执行）：调用 `register(ctx)` 绑定 handler；`info().load = LoadPolicy::Eager` 可改为注册时立即绑定。
+
+用户插件与内核插件对照：
+
+| | 用户插件 | 内核插件 |
+|---|---|---|
+| trait | `UserPlugin` | `KernelPlugin` |
+| 描述符 | `PluginDescriptor` | `KernelDescriptor` |
+| 注册方法 | `register_plugin` | `register_kernel_plugin` |
+| 注册上下文 | `PluginContext`（只含 `requires` 声明的句柄） | `KernelContext`（全量句柄） |
+| 能力声明 | 只能 `requires` | 可 `requires` + `provides` |
+| 信任边界 | 外（受限句柄） | 内（特权入口） |
+
 ## 用户插件（业务工具）
 
 用户插件在信任边界外：register 只收到**声明过的**服务句柄，看不到完整服务接口。
