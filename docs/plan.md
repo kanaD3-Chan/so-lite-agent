@@ -23,7 +23,7 @@
 - ✅ OpenAI 兼容适配器（Responses API + Chat Completions，覆盖 DeepSeek/SiliconFlow/Ollama）；
 - ✅ Anthropic Messages API 适配器（流式 text/tool_use）；
 - ✅ `register_openai_compatible()` / `ProviderRegistry` 接真实 API；
-- 🟡 验收：`tests/live_api.rs` 已就绪（`--ignored`，需 `SO_LITE_DEEPSEEK_URL/KEY/MODEL` 跑真实回合）。
+- ✅ 验收通过（2026-08-07）：`tests/live_api.rs` 真实 DeepSeek Responses 回合——直接 complete 与 Kernel 回合均返回正常回复（usage 含 reasoning_tokens）。
 
 ## M4：通用 RPC 与插件手册
 
