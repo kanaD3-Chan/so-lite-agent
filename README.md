@@ -77,4 +77,4 @@ cargo run --example hello
 
 ## 许可证
 
-MIT（与 mistake-agent 同源）。
+AGPL-3.0（与 mistake-agent 同源）。

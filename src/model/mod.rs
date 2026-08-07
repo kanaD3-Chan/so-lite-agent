@@ -1,5 +1,5 @@
 //! 模型 Provider 层（pi-ai 等价物）：ModelService 抽象、流式事件归一化、
-//! Provider 注册表（M2 骨架）与 Mock 桩。
+//! Provider 注册表、内置适配器与 Mock 桩。
 
 use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
@@ -12,6 +12,15 @@ use tokio_util::sync::CancellationToken;
 
 use crate::audit::{AuditRecord, Auditor};
 use crate::message::Message;
+
+mod anthropic;
+mod openai;
+
+pub use anthropic::AnthropicModelService;
+pub use openai::{
+    ChatCompletionsModelService, OpenAiCompatibleConfig, OpenAiTransport, ResponsesModelService,
+    register_openai_compatible,
+};
 
 // ---------- 取消信号（SIGTERM 通道；SIGKILL 由 dispatch 任务 abort 承担） ----------
 

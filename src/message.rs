@@ -27,11 +27,17 @@ impl std::fmt::Display for MessageId {
     }
 }
 
-/// 附件（图片 base64；上传链路使用）。
+/// 附件：中性文件引用（路径 + 名称），可携带内联数据（图片 base64 等）。
+/// RPC 层只传路径/名称，不固化使用方的暂存/白名单语义；数据由使用方自行填充。
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Attachment {
-    pub mime: String,
-    pub data_base64: String,
+    pub path: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mime: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub data_base64: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
