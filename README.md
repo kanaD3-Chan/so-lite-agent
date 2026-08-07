@@ -28,7 +28,23 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 }
 ```
 
-默认装配：`InMemorySessionStore` + `MockModelService`（固定文本桩）+ `MemoryEventSink` + `MemoryAuditSink`，不配任何东西也能跑通 hello 回合。真实模型 Provider（OpenAI 兼容 / Anthropic 兼容 / 自定义端点）在 M3 提供。
+默认装配：`InMemorySessionStore` + `MockModelService`（固定文本桩）+ `MemoryEventSink` + `MemoryAuditSink`，不配任何东西也能跑通 hello 回合。
+
+接真实模型（OpenAI 兼容端点，如 DeepSeek）：
+
+```rust
+let registry = ProviderRegistry::new();
+let service = register_openai_compatible(&registry, "deepseek", OpenAiCompatibleConfig {
+    api_url: "https://api.deepseek.com".into(),
+    api_key: key.into(),
+    model: "deepseek-v4-flash".into(),
+    transport: OpenAiTransport::Responses,
+    ..Default::default()
+})?;
+// KernelBuilder::new().service_handles(ServiceHandles::default().with_model(ModelHandle::new(service, timeout, auditor)))
+```
+
+Anthropic 兼容端点用 `AnthropicModelService`；自定义端点就是改 `api_url`。
 
 ## 开发上手
 
@@ -55,9 +71,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 | 阶段 | 内容 | 状态 |
 |---|---|---|
 | M2 | 新仓库骨架：通用模块 + 默认服务，hello 回合（mock） | 🟡 进行中（骨架完成，待评审） |
-| M3 | Provider 层：内置适配器 + register_provider | 未开始 |
-| M4 | 通用 RPC + KernelBuilder 定型；插件手册/参考模板迁移 | 未开始 |
-| M5 | 发布 crates.io（0.x）；mistake-agent 切换消费 | 未开始 |
+| M3 | Provider 层：内置适配器 + register_provider | ✅（live_api 真实回合待 key 验收） |
+| M4 | 通用 RPC + KernelBuilder 定型；插件手册/参考模板迁移 | ✅ |
+| M5 | mistake-agent 切换消费（crates.io 上架除外） | 🟡 待启动 |
 
 详见 [docs/plan.md](docs/plan.md)。
 

@@ -20,16 +20,18 @@
 
 ## M3：Provider 层
 
-- OpenAI 兼容适配器（覆盖 DeepSeek，Responses API + Chat Completions）；
-- Anthropic 兼容适配器；自定义端点；
-- `register_provider()` 接真实 API；验收：DeepSeek 真实 API 回合通过。
+- ✅ OpenAI 兼容适配器（Responses API + Chat Completions，覆盖 DeepSeek/SiliconFlow/Ollama）；
+- ✅ Anthropic Messages API 适配器（流式 text/tool_use）；
+- ✅ `register_openai_compatible()` / `ProviderRegistry` 接真实 API；
+- 🟡 验收：`tests/live_api.rs` 已就绪（`--ignored`，需 `SO_LITE_DEEPSEEK_URL/KEY/MODEL` 跑真实回合）。
 
 ## M4：通用 RPC 与插件手册
 
-- RpcRequest/RpcFrame + 通用 Method 子集 + `custom` 兜底 + `RpcExtension`；
-- KernelBuilder 定型；会话切换默认调度器与 `session::switch` 工具；
-- 插件开发手册/参考模板迁移到本仓库。
+- ✅ `RpcRequest`/`RpcFrame` + 通用 Method 子集（send_user_message / trigger_command / edit_message / switch_branch / abort / get_state / list_sessions / read_session / list_tools）+ `custom` 兜底 + `RpcExtension`；
+- ✅ Kernel 补齐：abort / edit_message / switch_branch / get_state / 附件（中性 path+name）；
+- ✅ 插件开发手册 + 参考模板（`docs/plugin-dev/reference/`，复制即开工）。
 
 ## M5：发布与切换
 
-- crates.io 0.x 发布；mistake-agent 切到新 crate 消费并删除重复代码（届时才改 mistake-agent）。
+- 决策（2026-08-07）：**crates.io 上架除外**，仅做消费切换；
+- 🟡 mistake-agent 切到新 crate 消费并删除重复代码（届时才改 mistake-agent），双端回归通过——待评估启动。

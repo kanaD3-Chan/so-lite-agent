@@ -19,4 +19,5 @@ pub mod logger;
 pub mod message;
 pub mod model;
 pub mod registry;
+pub mod rpc;
 pub mod services;

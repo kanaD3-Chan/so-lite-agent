@@ -17,10 +17,10 @@
 //! # }
 //! ```
 
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use serde_json::Value;
+use serde_json::{Value, json};
 
 use crate::agent::dispatch::Dispatch;
 use crate::agent::r#loop::{AgentLoop, LoopError, TurnInput, TurnOutcome};
@@ -29,9 +29,10 @@ use crate::audit::{AuditRecord, AuditSink, Auditor, MemoryAuditSink};
 use crate::contract::{PluginError, ToolError};
 use crate::events::{EventSink, MemoryEventSink};
 use crate::logger::{Logger, LoggerHandle};
-use crate::message::Message;
+use crate::message::{Attachment, Message, MessageId, MessageKind};
 use crate::model::{AbortSignal, MockModelService, ModelHandle, ModelService, ToolSchema};
 use crate::registry::{KernelDescriptor, PluginDescriptor, Registry};
+use crate::rpc::{Method, RpcAttachment, RpcError, RpcExtension, RpcFrame, RpcRequest};
 use crate::services::{InMemorySessionStore, ServiceHandles, SessionStore};
 
 pub struct KernelBuilder {
@@ -48,6 +49,7 @@ pub struct KernelBuilder {
     default_tool_timeout: Duration,
     grace: Duration,
     turn_budget: Duration,
+    rpc_extensions: Vec<Arc<dyn RpcExtension>>,
 }
 
 impl Default for KernelBuilder {
@@ -72,6 +74,7 @@ impl KernelBuilder {
             default_tool_timeout: Duration::from_secs(30),
             grace: Duration::from_secs(5),
             turn_budget: Duration::from_secs(10 * 60),
+            rpc_extensions: Vec::new(),
         }
     }
 
@@ -135,6 +138,12 @@ impl KernelBuilder {
 
     pub fn turn_budget(mut self, d: Duration) -> Self {
         self.turn_budget = d;
+        self
+    }
+
+    /// 挂一个业务方法扩展（settings/balance/cache 等走 `custom` 兜底）。
+    pub fn rpc_extension(mut self, ext: Arc<dyn RpcExtension>) -> Self {
+        self.rpc_extensions.push(ext);
         self
     }
 
@@ -204,12 +213,18 @@ impl KernelBuilder {
             events,
             bus,
             turn_budget: self.turn_budget,
+            rpc_extensions: self.rpc_extensions,
+            active: Mutex::new(None),
         })
     }
 }
 
 fn session_err(e: crate::services::SessionError) -> LoopError {
     LoopError::Internal(e.to_string())
+}
+
+fn rpc_error(e: &LoopError) -> RpcError {
+    RpcError::new("internal", e.to_string())
 }
 
 /// 组装完成的 Agent 内核（M2 直连 Rust API；通用 RPC 在 M4 定型）。
@@ -222,6 +237,8 @@ pub struct Kernel {
     events: Arc<dyn EventSink>,
     bus: InterruptBus,
     turn_budget: Duration,
+    rpc_extensions: Vec<Arc<dyn RpcExtension>>,
+    active: Mutex<Option<AbortSignal>>,
 }
 
 impl Kernel {
@@ -252,6 +269,17 @@ impl Kernel {
         key: SessionKey,
         text: &str,
     ) -> Result<TurnOutcome, LoopError> {
+        self.send_user_message_with_attachments(key, text, Vec::new())
+            .await
+    }
+
+    /// 带附件发送用户消息（附件为中性文件引用，数据由使用方自行填充）。
+    pub async fn send_user_message_with_attachments(
+        &self,
+        key: SessionKey,
+        text: &str,
+        attachments: Vec<Attachment>,
+    ) -> Result<TurnOutcome, LoopError> {
         if self
             .store
             .get_session(&key)
@@ -266,7 +294,13 @@ impl Kernel {
         }
 
         let mut messages = self.store.read_path(&key).await.map_err(session_err)?;
-        let user_msg = Message::user(text);
+        let mut user_msg = Message::user(text);
+        if let MessageKind::User {
+            attachments: atts, ..
+        } = &mut user_msg.kind
+        {
+            *atts = attachments;
+        }
         crate::message::append_to_path(&mut messages, user_msg.clone());
         self.store
             .append_message(&key, &user_msg)
@@ -274,16 +308,20 @@ impl Kernel {
             .map_err(session_err)?;
 
         let tools = self.registry.model_tools();
+        let signal = AbortSignal::new();
+        *self.active.lock().expect("active poisoned") = Some(signal.clone());
         let outcome = self
             .loop_engine
             .run_turn(TurnInput {
                 messages,
                 tools,
-                signal: AbortSignal::new(),
+                signal,
                 turn_budget: self.turn_budget,
                 forced_tool: None,
             })
-            .await?;
+            .await;
+        *self.active.lock().expect("active poisoned") = None;
+        let outcome = outcome?;
 
         for msg in &outcome.messages {
             self.store
@@ -316,6 +354,151 @@ impl Kernel {
             phase: "turn".into(),
         });
         Ok(outcome)
+    }
+
+    /// 取消当前回合（无活动回合时静默）。
+    pub fn abort(&self) {
+        if let Some(signal) = self.active.lock().expect("active poisoned").as_ref() {
+            signal.cancel();
+        }
+    }
+
+    pub fn get_state(&self) -> Value {
+        json!({
+            "running": self.active.lock().expect("active poisoned").is_some(),
+        })
+    }
+
+    /// 编辑消息：在 message_id 处派生新分支（文本替换，历史不截断）。
+    pub async fn edit_message(
+        &self,
+        key: SessionKey,
+        message_id: MessageId,
+        text: &str,
+    ) -> Result<Vec<Message>, LoopError> {
+        let new_path = self
+            .store
+            .derive_branch(&key, message_id, text)
+            .await
+            .map_err(session_err)?;
+        if let Some(branch_id) = new_path.last().map(|m| m.id) {
+            self.auditor.record(AuditRecord::MessageEdited {
+                message_id,
+                branch_id,
+            });
+        }
+        Ok(new_path)
+    }
+
+    /// 切换活跃路径（消息树分支）。
+    pub async fn switch_branch(
+        &self,
+        key: SessionKey,
+        message_id: MessageId,
+    ) -> Result<Vec<Message>, LoopError> {
+        let chain = self
+            .store
+            .switch_branch(&key, message_id)
+            .await
+            .map_err(session_err)?;
+        self.auditor
+            .record(AuditRecord::BranchSwitched { message_id });
+        Ok(chain)
+    }
+
+    /// 通用 RPC 入口：返回带 id 的响应帧。
+    pub async fn handle_rpc(&self, request: RpcRequest) -> RpcFrame {
+        let id = request.id;
+        match request.method {
+            Method::SendUserMessage {
+                session_key,
+                text,
+                attachments,
+            } => {
+                let key = session_key.unwrap_or_default();
+                let atts: Vec<Attachment> = attachments
+                    .into_iter()
+                    .map(|a: RpcAttachment| Attachment {
+                        path: a.path,
+                        name: a.name,
+                        mime: None,
+                        data_base64: None,
+                    })
+                    .collect();
+                match self
+                    .send_user_message_with_attachments(key, &text, atts)
+                    .await
+                {
+                    Ok(outcome) => RpcFrame::ok(
+                        id,
+                        json!({
+                            "stop_reason": outcome.stop_reason,
+                            "tool_calls": outcome.tool_calls,
+                            "messages": outcome.messages,
+                            "usage": outcome.usage,
+                            "session_key": outcome.session_key,
+                        }),
+                    ),
+                    Err(e) => RpcFrame::err(id, rpc_error(&e)),
+                }
+            }
+            Method::TriggerCommand { entry, params } => {
+                match self.dispatch.call_command(&entry, params).await {
+                    Ok(v) => RpcFrame::ok(id, v),
+                    Err(e) => RpcFrame::err(
+                        id,
+                        RpcError::new("tool_error", format!("{:?}: {}", e.code, e.message)),
+                    ),
+                }
+            }
+            Method::EditMessage {
+                session_key,
+                message_id,
+                text,
+            } => match self.edit_message(session_key, message_id, &text).await {
+                Ok(path) => RpcFrame::ok(id, serde_json::to_value(path).unwrap_or_default()),
+                Err(e) => RpcFrame::err(id, rpc_error(&e)),
+            },
+            Method::SwitchBranch {
+                session_key,
+                message_id,
+            } => match self.switch_branch(session_key, message_id).await {
+                Ok(chain) => RpcFrame::ok(id, serde_json::to_value(chain).unwrap_or_default()),
+                Err(e) => RpcFrame::err(id, rpc_error(&e)),
+            },
+            Method::Abort => {
+                self.abort();
+                RpcFrame::ok(id, Value::Null)
+            }
+            Method::GetState => RpcFrame::ok(id, self.get_state()),
+            Method::ListSessions => match self.list_sessions().await {
+                Ok(sessions) => {
+                    RpcFrame::ok(id, serde_json::to_value(sessions).unwrap_or_default())
+                }
+                Err(e) => RpcFrame::err(id, rpc_error(&e)),
+            },
+            Method::ReadSession { session_key } => match self.read_session(&session_key).await {
+                Ok(messages) => {
+                    RpcFrame::ok(id, serde_json::to_value(messages).unwrap_or_default())
+                }
+                Err(e) => RpcFrame::err(id, rpc_error(&e)),
+            },
+            Method::ListTools => RpcFrame::ok(
+                id,
+                serde_json::to_value(self.list_tools()).unwrap_or_default(),
+            ),
+            Method::Custom { method, params } => {
+                let mut last_err = RpcError::not_handled(&method);
+                for ext in &self.rpc_extensions {
+                    match ext.handle(&method, params.clone()).await {
+                        Ok(v) => return RpcFrame::ok(id, v),
+                        Err(e) if e.code == "not_handled" => last_err = e,
+                        Err(e) => return RpcFrame::err(id, e),
+                    }
+                }
+                RpcFrame::err(id, last_err)
+            }
+        }
     }
 
     pub async fn list_sessions(&self) -> Result<Vec<SessionMeta>, LoopError> {
