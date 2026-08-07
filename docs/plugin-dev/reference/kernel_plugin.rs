@@ -16,6 +16,7 @@ impl KernelPlugin for MyKernelPlugin {
     fn info() -> Info {
         Info {
             namespace: "kernel_my".into(),
+            enabled: true,
             provides: vec![ServiceId::custom("my_service")],
             tools: vec![tool_def("stats", "服务统计", CallerPolicy::UserAndModel)],
             ..Default::default()

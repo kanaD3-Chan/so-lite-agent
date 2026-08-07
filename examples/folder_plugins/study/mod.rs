@@ -16,6 +16,7 @@ impl UserPlugin for StudyPlugin {
     fn info() -> Info {
         Info {
             namespace: "study".into(),
+            enabled: true,
             requires: vec![notes_service_id()],
             tools: vec![tool_def(
                 "remind",

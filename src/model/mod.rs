@@ -14,13 +14,14 @@ use crate::audit::{AuditRecord, Auditor};
 use crate::message::Message;
 
 mod anthropic;
+mod completions;
 mod openai;
+mod responses;
 
 pub use anthropic::AnthropicModelService;
-pub use openai::{
-    ChatCompletionsModelService, OpenAiCompatibleConfig, OpenAiTransport, ResponsesModelService,
-    register_openai_compatible,
-};
+pub use completions::ChatCompletionsModelService;
+pub use openai::{OpenAiCompatibleConfig, OpenAiTransport, register_openai_compatible};
+pub use responses::ResponsesModelService;
 
 // ---------- 取消信号（SIGTERM 通道；SIGKILL 由 dispatch 任务 abort 承担） ----------
 

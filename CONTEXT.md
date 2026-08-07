@@ -61,8 +61,12 @@ kernel 按能力声明注入插件的受限接口；会话/模型走类型化句
 _Avoid_: 全局单例、直接依赖
 
 **Plugin directory（插件目录）**:
-插件的推荐组织方式：一插件一目录，mod.rs 承载两段式契约（info + register + descriptor），子模块放 handler 实现；禁用插件 = 从聚合点移除注册行（显式装配，无 disabled 标记语义）。
-_Avoid_: 插件文件夹（指实现细节）、disabled 标记（mistake-agent 编译期语义，本 crate 不用）
+插件的推荐组织方式：一插件一目录，mod.rs 承载两段式契约（info + register + descriptor），子模块放 handler 实现；禁用插件 = `enabled` 缺省 false，注册表跳过（聚合点可保留注册行）。
+_Avoid_: 插件文件夹（指实现细节）、disabled 标记文件（mistake-agent 编译期语义，本 crate 不用）
+
+**enabled（启用标记）**:
+`Info` 上的布尔字段，**缺省 false**：插件必须显式 `enabled: true` 才会注册；未启用的插件保留在代码/聚合点中，注册表静默跳过。
+_Avoid_: disabled 标记（反向命名，mistake-agent 遗留语义）
 
 **ProviderRegistry（Provider 注册表）**:
 具名模型 Provider 的登记与查询入口（M2 骨架，M3 接 HTTP 适配器）；不做全局可变状态。

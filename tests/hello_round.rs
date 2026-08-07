@@ -26,6 +26,7 @@ impl UserPlugin for EchoPlugin {
     fn info() -> Info {
         Info {
             namespace: "demo".into(),
+            enabled: true,
             tools: vec![tool_def("echo", "回显参数", CallerPolicy::UserAndModel)],
             ..Default::default()
         }

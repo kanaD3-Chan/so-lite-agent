@@ -132,6 +132,10 @@ impl Registry {
     }
 
     fn register_inner(&self, info: Info, body: PluginBody) -> Result<(), PluginError> {
+        if !info.enabled {
+            log::info!("插件未启用，跳过注册：{}", info.namespace);
+            return Ok(());
+        }
         let is_kernel = matches!(&body, PluginBody::Kernel(_));
         {
             let entries = self.entries.read().expect("registry poisoned");
@@ -463,6 +467,7 @@ mod tests {
         let desc = PluginDescriptor {
             info: Info {
                 namespace: "demo".into(),
+                enabled: true,
                 ..Default::default()
             },
             register: |_| Ok(()),
@@ -471,6 +476,7 @@ mod tests {
         let desc2 = PluginDescriptor {
             info: Info {
                 namespace: "demo".into(),
+                enabled: true,
                 ..Default::default()
             },
             register: |_| Ok(()),
@@ -479,6 +485,24 @@ mod tests {
             registry.register_plugin(desc2),
             Err(PluginError::NamespaceTaken(_))
         ));
+    }
+
+    #[test]
+    fn disabled_plugin_skipped_by_default() {
+        let registry = Registry::new(ServiceHandles::default(), logger());
+        let desc = PluginDescriptor {
+            info: Info {
+                namespace: "demo".into(),
+                tools: vec![tool_def("hello", "x", CallerPolicy::UserAndModel)],
+                ..Default::default()
+            },
+            register: |_| Ok(()),
+        };
+        // enabled 缺省 false：注册被静默跳过，不占 namespace、不进模型列表。
+        registry.register_plugin(desc).unwrap();
+        assert!(registry.namespaces().is_empty());
+        assert!(registry.model_tools().is_empty());
+        assert!(registry.handlers.read().unwrap().is_empty());
     }
 
     #[test]
@@ -491,6 +515,7 @@ mod tests {
         let desc = PluginDescriptor {
             info: Info {
                 namespace: "a".into(),
+                enabled: true,
                 tools: vec![tool_def("b_c", "t1", CallerPolicy::UserAndModel)],
                 ..Default::default()
             },
@@ -500,6 +525,7 @@ mod tests {
         let desc2 = PluginDescriptor {
             info: Info {
                 namespace: "a_b".into(),
+                enabled: true,
                 tools: vec![tool_def("c", "t2", CallerPolicy::UserAndModel)],
                 ..Default::default()
             },
@@ -515,6 +541,7 @@ mod tests {
         let desc = PluginDescriptor {
             info: Info {
                 namespace: "a".into(),
+                enabled: true,
                 tools: vec![tool_def("b__c", "t1", CallerPolicy::UserAndModel)],
                 ..Default::default()
             },
@@ -524,6 +551,7 @@ mod tests {
         let desc2 = PluginDescriptor {
             info: Info {
                 namespace: "a__b".into(),
+                enabled: true,
                 tools: vec![tool_def("c", "t2", CallerPolicy::UserAndModel)],
                 ..Default::default()
             },
@@ -541,6 +569,7 @@ mod tests {
         let desc = PluginDescriptor {
             info: Info {
                 namespace: "demo".into(),
+                enabled: true,
                 requires: vec![ServiceId::custom("model")],
                 ..Default::default()
             },
@@ -558,6 +587,7 @@ mod tests {
         let desc = PluginDescriptor {
             info: Info {
                 namespace: "demo".into(),
+                enabled: true,
                 tools: vec![tool_def("hello", "打招呼", CallerPolicy::UserAndModel)],
                 ..Default::default()
             },
@@ -580,6 +610,7 @@ mod tests {
         let desc2 = PluginDescriptor {
             info: Info {
                 namespace: "demo".into(),
+                enabled: true,
                 tools: vec![tool_def("hello", "x", CallerPolicy::UserAndModel)],
                 ..Default::default()
             },
@@ -598,6 +629,7 @@ mod tests {
         let desc = PluginDescriptor {
             info: Info {
                 namespace: "demo".into(),
+                enabled: true,
                 tools: vec![tool_def("hello", "x", CallerPolicy::UserAndModel)],
                 ..Default::default()
             },
@@ -627,6 +659,7 @@ mod tests {
         let desc = PluginDescriptor {
             info: Info {
                 namespace: "demo".into(),
+                enabled: true,
                 tools: vec![
                     ToolDef {
                         name: "hidden".into(),
@@ -669,6 +702,7 @@ mod tests {
         let desc = KernelDescriptor {
             info: Info {
                 namespace: "kernel_demo".into(),
+                enabled: true,
                 provides: vec![ServiceId::custom("memory")],
                 tools: vec![tool_def("ping", "内核工具", CallerPolicy::UserAndModel)],
                 ..Default::default()
@@ -696,6 +730,7 @@ mod tests {
         let desc = KernelDescriptor {
             info: Info {
                 namespace: "a".into(),
+                enabled: true,
                 provides: vec![ServiceId::custom("memory")],
                 ..Default::default()
             },
@@ -705,6 +740,7 @@ mod tests {
         let desc2 = KernelDescriptor {
             info: Info {
                 namespace: "b".into(),
+                enabled: true,
                 provides: vec![ServiceId::custom("memory")],
                 ..Default::default()
             },
@@ -722,6 +758,7 @@ mod tests {
         let desc = PluginDescriptor {
             info: Info {
                 namespace: "demo".into(),
+                enabled: true,
                 provides: vec![ServiceId::custom("storage")],
                 ..Default::default()
             },
@@ -739,6 +776,7 @@ mod tests {
         let kernel = KernelDescriptor {
             info: Info {
                 namespace: "a".into(),
+                enabled: true,
                 tools: vec![tool_def("b__c", "t1", CallerPolicy::UserAndModel)],
                 ..Default::default()
             },
@@ -748,6 +786,7 @@ mod tests {
         let user = PluginDescriptor {
             info: Info {
                 namespace: "a__b".into(),
+                enabled: true,
                 tools: vec![tool_def("c", "t2", CallerPolicy::UserAndModel)],
                 ..Default::default()
             },

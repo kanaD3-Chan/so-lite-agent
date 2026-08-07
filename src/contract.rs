@@ -31,6 +31,10 @@ pub enum LoadPolicy {
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct Info {
     pub namespace: String,
+    /// 启用标记：**默认 false**——插件必须显式 `enabled: true` 才会注册；
+    /// 禁用插件可保留在聚合点/代码中，注册表静默跳过（不做 fail-fast）。
+    #[serde(default)]
+    pub enabled: bool,
     #[serde(default)]
     pub requires: Vec<ServiceId>,
     /// 内核插件声明的服务提供：每个 ServiceId 至多由一个内核插件提供；

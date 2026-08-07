@@ -16,6 +16,7 @@ impl UserPlugin for MyPlugin {
     fn info() -> Info {
         Info {
             namespace: "my".into(),
+            enabled: true,
             requires: vec![ServiceId::custom("my_service")],
             tools: vec![tool_def("hello", "打招呼", CallerPolicy::UserAndModel)],
             ..Default::default()

@@ -65,6 +65,7 @@ impl KernelPlugin for NotesKernelPlugin {
     fn info() -> Info {
         Info {
             namespace: "kernel_notes".into(),
+            enabled: true,
             provides: vec![notes_service_id()],
             tools: vec![tool_def(
                 "stats",
@@ -102,6 +103,7 @@ impl UserPlugin for StudyPlugin {
     fn info() -> Info {
         Info {
             namespace: "study".into(),
+            enabled: true,
             requires: vec![notes_service_id()],
             tools: vec![tool_def(
                 "remind",

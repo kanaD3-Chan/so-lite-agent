@@ -16,6 +16,7 @@ impl KernelPlugin for NotesKernelPlugin {
     fn info() -> Info {
         Info {
             namespace: "kernel_notes".into(),
+            enabled: true,
             provides: vec![notes_service_id()],
             tools: vec![tool_def(
                 "stats",

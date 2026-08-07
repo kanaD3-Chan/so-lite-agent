@@ -33,6 +33,7 @@ KernelBuilder::new().register_kernel_plugin(desc);
 
 - **注册时**（`build()` / `register_*_plugin` 调用）：只校验 `info()` 的声明——namespace/wire 唯一、`requires` 可满足、`provides` 不重复、用户插件不得 provides；
 - **加载时**（默认懒加载，首次命中入口点才执行）：调用 `register(ctx)` 绑定 handler；`info().load = LoadPolicy::Eager` 可改为注册时立即绑定。
+- **enabled 标记**：`Info.enabled` 缺省 **false**——插件未启用时注册表静默跳过（保留在聚合点无害）；显式 `enabled: true` 才注册。
 
 **为什么不用宏/自动发现**：注册保持**显式链式调用**（`register_plugin` / `register_kernel_plugin` 各一行），延续 mistake-agent 的显式装配设计（对应其 ADR-0036 的结论）。曾评估过两类替代：属性宏 + 一次聚合（仍需显式清单，收益有限）与 `inventory`/`linkme` 链接期自动收集（最接近 Python 装饰器，但引入隐式全局注册表、平台坑，且破坏 build 时 fail-fast 的可预期性）——均被否。以后若想减少样板，加宏是纯增量、不破坏现有 API。
 
@@ -58,6 +59,7 @@ impl UserPlugin for StudyPlugin {
     fn info() -> Info {
         Info {
             namespace: "study".into(),
+            enabled: true,
             requires: vec![ServiceId::custom("notes")],
             tools: vec![tool_def("remind", "提醒复习", CallerPolicy::UserAndModel)],
             ..Default::default()
@@ -111,7 +113,7 @@ pub mod study;
 .register_plugin(PluginDescriptor::from_plugin::<plugins::study::StudyPlugin>())
 ```
 
-禁用插件 = 从聚合点删掉那一行（或 feature flag 条件编译），不需要 `disabled` 标记文件——那是 mistake-agent 编译期 include! 聚合的配套，这里注册是显式的。
+禁用语义在描述符里：**`enabled` 缺省 false，显式 `enabled: true` 才注册**；聚合点可以保留所有插件的注册行，未启用的会被注册表静默跳过（不需要 `disabled` 标记文件——那是 mistake-agent 编译期 include! 聚合的配套）。
 
 完整可运行示例：[examples/folder_plugins](../examples/folder_plugins/main.rs)（study/ 用户插件 + kernel_notes/ 内核插件 + 共享 notes.rs）。
 
@@ -124,6 +126,7 @@ impl KernelPlugin for NotesKernelPlugin {
     fn info() -> Info {
         Info {
             namespace: "kernel_notes".into(),
+            enabled: true,
             provides: vec![ServiceId::custom("notes")], // 声明服务身份（全局唯一）
             tools: vec![tool_def("stats", "统计", CallerPolicy::UserAndModel)],
             ..Default::default()
