@@ -24,7 +24,9 @@ use serde_json::{Value, json};
 
 use crate::agent::dispatch::Dispatch;
 use crate::agent::r#loop::{AgentLoop, LoopError, TurnInput, TurnOutcome};
-use crate::agent::session::{InterruptBus, SessionKey, SessionMeta, StubSummarizer};
+use crate::agent::session::{
+    InterruptBus, SessionKey, SessionMeta, SessionSwitch, StubSummarizer, Summarizer,
+};
 use crate::audit::{AuditRecord, AuditSink, Auditor, MemoryAuditSink};
 use crate::contract::{PluginError, ToolError};
 use crate::events::{EventSink, MemoryEventSink};
@@ -42,6 +44,8 @@ pub struct KernelBuilder {
     kernel_plugins: Vec<KernelDescriptor>,
     plugins: Vec<PluginDescriptor>,
     system_prompt: Option<Arc<dyn Fn() -> String + Send + Sync>>,
+    summarizer: Option<Arc<dyn Summarizer>>,
+    session_switch: Option<Arc<dyn SessionSwitch>>,
     max_tool_calls: usize,
     max_consecutive_failures: usize,
     context_limit_tokens: usize,
@@ -67,6 +71,8 @@ impl KernelBuilder {
             kernel_plugins: Vec::new(),
             plugins: Vec::new(),
             system_prompt: None,
+            summarizer: None,
+            session_switch: None,
             max_tool_calls: 25,
             max_consecutive_failures: 3,
             context_limit_tokens: 131_072,
@@ -108,6 +114,19 @@ impl KernelBuilder {
     /// 人格注入：替代 loop 直调，每轮请求重新生成系统提示。
     pub fn system_prompt(mut self, f: impl Fn() -> String + Send + Sync + 'static) -> Self {
         self.system_prompt = Some(Arc::new(f));
+        self
+    }
+
+    /// 注入真实摘要器（压缩/交接摘要）；缺省用计数摘要桩 [`StubSummarizer`]。
+    pub fn summarizer(mut self, s: Arc<dyn Summarizer>) -> Self {
+        self.summarizer = Some(s);
+        self
+    }
+
+    /// 注入会话切换钩子（回合内 `session::switch` 由 loop 执行）；
+    /// 缺省无切换能力（工具会返回"会话切换不可用"）。
+    pub fn session_switch(mut self, s: Arc<dyn SessionSwitch>) -> Self {
+        self.session_switch = Some(s);
         self
     }
 
@@ -188,6 +207,8 @@ impl KernelBuilder {
         let store = handles.session().expect("默认会话存储已注入").clone();
         let system_prompt: Arc<dyn Fn() -> String + Send + Sync> =
             self.system_prompt.unwrap_or_else(|| Arc::new(String::new));
+        let summarizer: Arc<dyn Summarizer> =
+            self.summarizer.unwrap_or_else(|| Arc::new(StubSummarizer));
 
         let loop_engine = Arc::new(
             AgentLoop::new(
@@ -196,9 +217,9 @@ impl KernelBuilder {
                 auditor.clone(),
                 events.clone(),
                 system_prompt,
-                Arc::new(StubSummarizer),
+                summarizer,
                 bus.clone(),
-                None,
+                self.session_switch,
             )
             .with_compaction_limits(self.context_limit_tokens, self.compaction_keep_last)
             .with_tool_guards(self.max_tool_calls, self.max_consecutive_failures),
@@ -517,5 +538,188 @@ impl Kernel {
     /// 用户触发入口（等价 trigger_command）：找不到 Command 时回退同名 Tool。
     pub async fn call_command(&self, entry: &str, params: Value) -> Result<Value, ToolError> {
         self.dispatch.call_command(entry, params).await
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use async_trait::async_trait;
+    use std::collections::VecDeque;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    use crate::agent::dispatch::ToolCallContext;
+    use crate::agent::r#loop::StopReason;
+    use crate::agent::session::{Goal, SessionSwitch, Summarizer};
+    use crate::contract::{CallerPolicy, Info};
+    use crate::model::{ItemKind, ModelChunk, ModelError, ModelRequest, ModelStream};
+    use crate::registry::tool_def;
+
+    struct CountingSummarizer(Arc<AtomicUsize>);
+
+    #[async_trait]
+    impl Summarizer for CountingSummarizer {
+        async fn summarize(&self, _messages: &[Message], _goal: Option<&Goal>) -> String {
+            self.0.fetch_add(1, Ordering::SeqCst);
+            "计数摘要".into()
+        }
+    }
+
+    struct SequenceModel {
+        queues: Mutex<VecDeque<Vec<Result<ModelChunk, ModelError>>>>,
+    }
+
+    impl SequenceModel {
+        fn new(queues: Vec<Vec<Result<ModelChunk, ModelError>>>) -> Self {
+            Self {
+                queues: Mutex::new(queues.into()),
+            }
+        }
+    }
+
+    #[async_trait]
+    impl ModelService for SequenceModel {
+        async fn stream(
+            &self,
+            _request: &ModelRequest,
+            _signal: &AbortSignal,
+        ) -> Result<ModelStream, ModelError> {
+            let chunks = self
+                .queues
+                .lock()
+                .expect("script poisoned")
+                .pop_front()
+                .ok_or_else(|| ModelError::Protocol("脚本耗尽".into()))?;
+            Ok(Box::new(futures_util::stream::iter(chunks)))
+        }
+    }
+
+    fn switch_call_chunks() -> Vec<Result<ModelChunk, ModelError>> {
+        vec![
+            Ok(ModelChunk::ToolCallStart {
+                index: 0,
+                call_id: "switch_1".into(),
+                name: "session__switch".into(),
+            }),
+            Ok(ModelChunk::ToolCallDelta {
+                index: 0,
+                data: r#"{"goal":"切换去整理错题"}"#.into(),
+            }),
+            Ok(ModelChunk::ItemDone {
+                kind: ItemKind::FunctionCall,
+            }),
+            Ok(ModelChunk::Done),
+        ]
+    }
+
+    fn text_chunks(text: &str) -> Vec<Result<ModelChunk, ModelError>> {
+        vec![
+            Ok(ModelChunk::TextDelta(text.into())),
+            Ok(ModelChunk::ItemDone {
+                kind: ItemKind::Message,
+            }),
+            Ok(ModelChunk::Done),
+        ]
+    }
+
+    struct TestSwitch {
+        switched: Arc<Mutex<Vec<String>>>,
+    }
+
+    #[async_trait]
+    impl SessionSwitch for TestSwitch {
+        async fn switch(&self, goal: &str) -> Result<SessionKey, String> {
+            self.switched
+                .lock()
+                .expect("switched poisoned")
+                .push(goal.into());
+            Ok(SessionKey::new())
+        }
+    }
+
+    #[tokio::test]
+    async fn builder_wires_summarizer_for_compaction() {
+        let counted = Arc::new(AtomicUsize::new(0));
+        let store = Arc::new(InMemorySessionStore::default());
+        let key = SessionKey::new();
+        store
+            .create_session(&key, &SessionMeta::new(key))
+            .await
+            .unwrap();
+        for i in 0..3 {
+            store
+                .append_message(
+                    &key,
+                    &Message::user(format!("第 {i} 条长消息：{}", "长内容填充。".repeat(40))),
+                )
+                .await
+                .unwrap();
+        }
+
+        let kernel = KernelBuilder::new()
+            .service_handles(ServiceHandles::default().with_session(store))
+            .summarizer(Arc::new(CountingSummarizer(counted.clone())))
+            .context_limit_tokens(100)
+            .compaction_keep_last(2)
+            .build()
+            .unwrap();
+
+        let outcome = kernel.send_user_message(key, "继续").await.unwrap();
+        assert!(outcome.compaction.is_some(), "达到阈值应触发压缩");
+        assert!(
+            counted.load(Ordering::SeqCst) > 0,
+            "注入的摘要器应被 loop 调用"
+        );
+    }
+
+    #[tokio::test]
+    async fn builder_wires_session_switch_hook() {
+        let switched = Arc::new(Mutex::new(Vec::new()));
+        let auditor = Auditor::new(Arc::new(MemoryAuditSink::default()));
+        let handles = ServiceHandles::default().with_model(ModelHandle::new(
+            Arc::new(SequenceModel::new(vec![
+                switch_call_chunks(),
+                text_chunks("已切换会话。"),
+            ])),
+            Duration::from_secs(30),
+            auditor,
+        ));
+
+        let kernel = KernelBuilder::new()
+            .event_sink(Arc::new(MemoryEventSink::default()))
+            .service_handles(handles)
+            .register_plugin(PluginDescriptor {
+                info: Info {
+                    namespace: "session".into(),
+                    enabled: true,
+                    tools: vec![tool_def("switch", "切换会话", CallerPolicy::UserAndModel)],
+                    ..Default::default()
+                },
+                register: |ctx| {
+                    ctx.registrar.tool(
+                        "switch",
+                        Arc::new(|_ctx: &ToolCallContext, _params: Value| {
+                            Box::pin(async move { Ok(json!({ "switched": false })) })
+                        }),
+                    )
+                },
+            })
+            .session_switch(Arc::new(TestSwitch {
+                switched: switched.clone(),
+            }))
+            .build()
+            .unwrap();
+
+        let outcome = kernel
+            .send_user_message(SessionKey::new(), "切换去整理错题")
+            .await
+            .unwrap();
+        assert!(matches!(outcome.stop_reason, StopReason::Natural));
+        assert!(outcome.session_key.is_some(), "回合内切换应回填新会话键");
+        assert_eq!(
+            switched.lock().expect("switched poisoned").len(),
+            1,
+            "注入的切换钩子应被 loop 调用"
+        );
     }
 }
