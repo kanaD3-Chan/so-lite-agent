@@ -1,6 +1,9 @@
-# 里程碑计划（M2 进行中）
+# 里程碑计划
 
 > 决策背景：mistake-agent 本仓库不修改（ADR-0001），so-lite-agent 独立推进。
+>
+> 状态：**M2–M4 已落地**（2026-08-07 评审通过），**M5 冻结**——mistake-agent
+> 消费切换推迟到 v3 再评估，本仓库保持冻结。
 
 ## M2：新仓库骨架（当前）
 
@@ -16,7 +19,7 @@
 | KernelBuilder（默认服务自动补齐、插件注册 fail-fast）+ Kernel 直连 API | ✅ |
 | hello 回合示例 + 集成测试（默认 mock、工具调用、持久化） | ✅ |
 | cargo test / clippy / fmt 全绿（18 测试） | ✅ |
-| 文档：README / CONTEXT.md / ADR 0001-0004 | ✅ |
+| 文档：README / CONTEXT.md / AGENTS.md / kernel-dev / api / ADR 0001-0005 | ✅ |
 
 ## M3：Provider 层
 

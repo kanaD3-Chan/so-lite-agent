@@ -1,6 +1,8 @@
 # 插件开发上手
 
+> **从这里开始，不需要理解内核设计**：`cargo add so-lite-agent` 后按本文写插件即可。
 > 完整可运行示例：[examples/plugins.rs](../examples/plugins.rs)。
+> 内核实现细节见 [kernel-dev.md](kernel-dev.md)，接口参考见 [api.md](api.md)。
 
 ## 心智模型
 

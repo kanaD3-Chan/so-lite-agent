@@ -4,6 +4,10 @@ So Lite Agent 是开箱即用的通用 Agent 运行时（官方简写 **SL Agent
 
 参考 [earendil-works/pi](https://github.com/earendil-works/pi) 的分层——模型 Provider 层（pi-ai 等价物）与 Agent core 层（pi-agent-core 等价物）内置随包，领域层（业务插件）由使用方编写。mistake-agent 是本仓库的参考实现与消费方（保持独立，不做 M1 解耦，见 [ADR-0001](docs/adr/0001-independent-repo-skip-m1.md)）。
 
+> **只做 Agent 的开发者**：`cargo add so-lite-agent` 后按 [docs/plugin-dev.md](docs/plugin-dev.md)
+> 写内核/用户插件即可上手，**无需理解内核设计**；内核细节（[docs/kernel-dev.md](docs/kernel-dev.md)）
+> 只给维护者/深度集成者，接口参考见 [docs/api.md](docs/api.md)。
+
 ## 快速开始
 
 ```bash
@@ -48,10 +52,16 @@ Anthropic 兼容端点用 `AnthropicModelService`；自定义端点就是改 `ap
 
 ## 开发上手
 
+- 只做 Agent：`cargo add so-lite-agent` → 按 [docs/plugin-dev.md](docs/plugin-dev.md) 写插件（不需要懂内核）；
 - 先跑 [examples/hello.rs](examples/hello.rs)：最小内核 + hello 回合；
 - 再跑 [examples/plugins.rs](examples/plugins.rs)：自定义服务 + 内核插件 + 用户插件端到端（脚本化模型模拟两次工具调用）；
 - 目录编排见 [examples/folder_plugins](examples/folder_plugins/main.rs)：一插件一目录（mod.rs 契约 + core.rs 实现）+ 聚合点；
 - 插件怎么下手：见 [docs/plugin-dev.md](docs/plugin-dev.md)。
+- 内核怎么改：见 [docs/kernel-dev.md](docs/kernel-dev.md)；接口/RPC/事件：见 [docs/api.md](docs/api.md)。
+
+## 协作约定
+
+协作者/贡献者先读 [AGENTS.md](AGENTS.md)：文档启动流程、常用命令、架构红线与开发约定。
 
 ## 模块一页
 

@@ -10,9 +10,25 @@ _Avoid_: SLA、LiteAgent、SL-Agent（连字符变体）
 
 ## 运行时结构
 
+**Kernel（内核）**:
+`KernelBuilder::build()` 组装完成的通用 Agent 运行时实例：agent loop、工具调度、会话存储、模型句柄、中断总线与 RPC 入口。使用方只与 Kernel / KernelBuilder 打交道，不必理解内部设计。
+_Avoid_: 引擎（含义过宽）
+
+**KernelBuilder（装配入口）**:
+crate 的唯一装配入口：默认补齐 `InMemorySessionStore` + `MockModelService` + `MemoryEventSink` + `MemoryAuditSink` + 空系统提示 + `StubSummarizer`（ADR-0003），显式传过的一律优先；插件注册 fail-fast。
+_Avoid_: 手动拼装 Kernel（字段私有，构造唯一入口）
+
 **Agent loop（Agent 循环）**:
 kernel 的一次执行单元驱动器：LLM 是唯一决策者，kernel 执行工具调用并保证安全边界；停止条件包括模型自然停止、工具调用上限、连续失败、回合超时与用户取消。
 _Avoid_: 调度器（指会话切换决策）、引擎
+
+**Event（事件流）**:
+kernel 向使用方 GUI 播报的通用事件（消息/推理增量、工具起止与进度、回合结束、会话切换、压缩、错误）；业务事件经 `Event::Custom` 扩展（ADR-0004）。
+_Avoid_: 业务事件（记忆变更、验算请求等走 Custom）
+
+**Audit（审计）**:
+默认全覆盖的操作记录（EntryPointCall / LlmCall / TurnEnded 等），经 `AuditSink` 落盘；通用变体只含运行时语义，业务审计由使用方 sink 附加。
+_Avoid_: 日志（诊断日志与审计分离）
 
 **Turn（回合）**:
 kernel 一次完整的 agent 执行单元：从输入触发开始，到模型自然停止或护栏中止结束，期间可多次调用工具。
@@ -69,8 +85,12 @@ _Avoid_: 插件文件夹（指实现细节）、disabled 标记文件（mistake-
 _Avoid_: disabled 标记（反向命名，mistake-agent 遗留语义）
 
 **ProviderRegistry（Provider 注册表）**:
-具名模型 Provider 的登记与查询入口（M2 骨架，M3 接 HTTP 适配器）；不做全局可变状态。
+具名模型 Provider 的登记与查询入口；HTTP 适配器（OpenAI 兼容 / Anthropic）经 `register_openai_compatible` / `AnthropicModelService` 接入（M3 完成）；不做全局可变状态。
 _Avoid_: 模型管理器（含义过宽）
+
+**RpcExtension（业务方法扩展）**:
+使用方把业务方法挂到通用 RPC `custom` 兜底链的 trait；返回 `not_handled` 时 kernel 继续询问下一个扩展（ADR-0004）。
+_Avoid_: 往通用 Method 枚举塞业务字段
 
 ## 会话与消息
 
@@ -99,5 +119,9 @@ _Avoid_: 当前分支（口语）
 _Avoid_: 截断（原文被删）
 
 **Summarizer（摘要器）**:
-生成压缩/交接摘要的组件；crate 默认计数桩，真实 LLM 摘要由使用方注入。
+生成压缩/交接摘要的组件；crate 默认计数桩（`StubSummarizer`），真实 LLM 摘要经 `KernelBuilder::summarizer` 注入。
 _Avoid_: 总结模型（指具体实现）
+
+**SessionSwitch（会话切换钩子）**:
+回合内 `session::switch` 由 loop 调用的钩子；默认调度器与 `session::switch` 工具注册由使用方实现，经 `KernelBuilder::session_switch` 注入。
+_Avoid_: Session scheduler（mistake-agent 内部模块名）
