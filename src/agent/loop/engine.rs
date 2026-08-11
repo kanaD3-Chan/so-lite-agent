@@ -1,15 +1,14 @@
-//! Agent loop：LLM 唯一决策者，kernel 执行工具调用。
+//! AgentLoop：LLM 唯一决策者，kernel 执行工具调用（护栏/压缩/中断消费）。
 //!
 //! 停止条件：模型自然停止 / 工具调用上限（默认 25）/ 相同失败连续 N 次（默认 3）/
-//! 单轮总超时 / 用户取消。系统提示由 [`AgentLoop::new`] 注入的 provider 生成
-//! （不落消息树，每轮请求重新注入）。上下文压缩在回合边界按 75% 阈值触发。
+//! 单轮总超时 / 用户取消。系统提示由注入的 provider 生成（不落消息树，
+//! 每轮请求重新注入）。上下文压缩在回合边界按 75% 阈值触发。
 
 use std::collections::BTreeMap;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use futures_util::StreamExt;
-use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
 use crate::agent::dispatch::{Caller, Dispatch};
@@ -19,76 +18,12 @@ use crate::contract::{ToolError, ToolErrorCode};
 use crate::events::{Event, EventSink};
 use crate::message::{Message, MessageId, MessageKind, append_to_path};
 use crate::model::{
-    AbortSignal, ItemKind, ModelChunk, ModelError, ModelKind, ModelRequest, ModelService,
-    TokenUsage, ToolChoice, ToolSchema,
+    ItemKind, ModelChunk, ModelError, ModelKind, ModelRequest, ModelService, TokenUsage, ToolChoice,
 };
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum InterruptReason {
-    ModelUnavailable,
-    /// 通用配置变更（settings 等），下回合按新环境重组上下文。
-    ConfigChanged,
-    AuditFailure,
-    PluginRequested(String),
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum StopReason {
-    Natural,
-    ToolCallLimit,
-    ConsecutiveFailures,
-    TurnTimeout,
-    UserAborted,
-    /// 回合失败（模型/协议/内部错误），前端应恢复可聊天状态。
-    Failed,
-    InternalAbort {
-        reason: InterruptReason,
-    },
-}
-
-pub struct TurnInput {
-    pub messages: Vec<Message>,
-    pub tools: Vec<ToolSchema>,
-    pub signal: AbortSignal,
-    pub turn_budget: Duration,
-    /// 强制首轮调用的工具（wire name）；执行后后续轮次恢复 auto。
-    pub forced_tool: Option<String>,
-}
-
-#[derive(Debug)]
-pub struct TurnOutcome {
-    pub messages: Vec<Message>,
-    pub stop_reason: StopReason,
-    pub tool_calls: usize,
-    /// 本回合发生的上下文压缩（None = 未压缩）。
-    pub compaction: Option<CompactionInfo>,
-    /// 本回合所有主模型流调用的累计 token 用量。
-    pub usage: Option<TokenUsage>,
-    /// 回合内经 session::switch 切换后的新会话（None = 未切换，仍用原会话）。
-    pub session_key: Option<SessionKey>,
-}
-
-#[derive(Debug, Clone)]
-pub struct CompactionInfo {
-    /// 已写入 messages 的摘要消息（调用方需要跳过重复落盘并接入存储链）。
-    pub summary: Message,
-    /// 保留段首条消息 id（其 parent 应改挂到 summary 下）。
-    pub tail_start: MessageId,
-    /// 压缩掉的旧消息条数。
-    pub summarized: usize,
-    /// 压缩时会话末尾消息 id（活跃路径推进目标）。
-    pub tail_end: MessageId,
-}
-
-#[derive(Debug, thiserror::Error)]
-pub enum LoopError {
-    #[error("模型错误：{0}")]
-    Model(String),
-    #[error("内部错误：{0}")]
-    Internal(String),
-}
+use super::types::{
+    CompactionInfo, InterruptReason, LoopError, StopReason, TurnInput, TurnOutcome,
+};
 
 struct ToolCallAcc {
     name: String,
@@ -628,155 +563,4 @@ fn new_messages(
         .filter(|m| !preexisting.contains(&m.id))
         .cloned()
         .collect()
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::agent::session::{InterruptBus, StubSummarizer};
-    use crate::audit::MemoryAuditSink;
-    use crate::events::MemoryEventSink;
-    use crate::model::{ModelResponse, ModelStream};
-    use crate::registry::Registry;
-    use crate::services::ServiceHandles;
-
-    struct ScriptedLoopModel;
-
-    #[async_trait::async_trait]
-    impl ModelService for ScriptedLoopModel {
-        async fn stream(
-            &self,
-            _request: &ModelRequest,
-            _signal: &AbortSignal,
-        ) -> Result<ModelStream, ModelError> {
-            let chunks = vec![
-                Ok(ModelChunk::TextDelta("好的，已处理。".into())),
-                Ok(ModelChunk::ItemDone {
-                    kind: ItemKind::Message,
-                }),
-                Ok(ModelChunk::Done),
-            ];
-            Ok(Box::new(futures_util::stream::iter(chunks)))
-        }
-
-        async fn complete(
-            &self,
-            _request: &ModelRequest,
-            _signal: &AbortSignal,
-        ) -> Result<ModelResponse, ModelError> {
-            Err(ModelError::Transport("测试模型不支持 complete".into()))
-        }
-    }
-
-    fn setup_loop(
-        bus: InterruptBus,
-        context_limit: usize,
-    ) -> (Arc<AgentLoop>, Arc<MemoryAuditSink>, Arc<MemoryEventSink>) {
-        let events = Arc::new(MemoryEventSink::default());
-        let sink = Arc::new(MemoryAuditSink::default());
-        let auditor = Auditor::new(sink.clone());
-        let registry = Arc::new(Registry::new(
-            ServiceHandles::default(),
-            Arc::new(crate::logger::Logger),
-        ));
-        let dispatch = Arc::new(Dispatch::new(
-            registry,
-            auditor.clone(),
-            Duration::from_secs(30),
-            Duration::from_secs(5),
-            Duration::from_secs(10 * 60),
-            events.clone(),
-        ));
-        let loop_engine = Arc::new(
-            AgentLoop::new(
-                Arc::new(ScriptedLoopModel),
-                dispatch,
-                auditor,
-                events.clone(),
-                Arc::new(String::new),
-                Arc::new(StubSummarizer),
-                bus,
-                None,
-            )
-            .with_compaction_limits(context_limit, 2),
-        );
-        (loop_engine, sink, events)
-    }
-
-    fn long_messages(count: usize) -> Vec<Message> {
-        (0..count)
-            .map(|i| {
-                Message::user(format!(
-                    "第 {i} 条长消息：{}",
-                    "数学错题讲解与知识点分析内容填充。".repeat(8)
-                ))
-            })
-            .collect()
-    }
-
-    #[tokio::test]
-    async fn compaction_compresses_old_messages_and_keeps_tail() {
-        let bus = InterruptBus::new();
-        let (loop_engine, _, _) = setup_loop(bus.clone(), 100);
-        let input = TurnInput {
-            messages: long_messages(6),
-            tools: Vec::new(),
-            signal: AbortSignal::new(),
-            turn_budget: Duration::from_secs(60),
-            forced_tool: None,
-        };
-        let outcome = loop_engine.run_turn(input).await.unwrap();
-        let compaction = outcome.compaction.expect("达到阈值应触发压缩");
-        assert!(compaction.summarized > 0);
-        assert!(
-            matches!(
-                outcome.messages[0].kind,
-                MessageKind::System { ref text } if text.contains("上下文压缩摘要")
-            ),
-            "摘要应作为 system 消息写入"
-        );
-        assert!(outcome.messages.len() <= 3, "保留摘要 + 最近 2 条");
-    }
-
-    #[tokio::test]
-    async fn below_threshold_skips_compaction() {
-        let (loop_engine, _, _) = setup_loop(InterruptBus::new(), 100_000);
-        let input = TurnInput {
-            messages: vec![Message::user("短消息")],
-            tools: Vec::new(),
-            signal: AbortSignal::new(),
-            turn_budget: Duration::from_secs(60),
-            forced_tool: None,
-        };
-        let outcome = loop_engine.run_turn(input).await.unwrap();
-        assert!(outcome.compaction.is_none());
-    }
-
-    #[tokio::test]
-    async fn turn_boundary_consumes_interrupts_and_audits() {
-        let bus = InterruptBus::new();
-        bus.send(Interrupt::ConfigChanged);
-        bus.send(Interrupt::CompactionDone {
-            session: SessionKey::new(),
-        });
-        let (loop_engine, sink, _) = setup_loop(bus, 100_000);
-        let input = TurnInput {
-            messages: vec![Message::user("你好")],
-            tools: Vec::new(),
-            signal: AbortSignal::new(),
-            turn_budget: Duration::from_secs(60),
-            forced_tool: None,
-        };
-        loop_engine.run_turn(input).await.unwrap();
-        let records = sink.take();
-        let interrupts: Vec<_> = records
-            .iter()
-            .filter(|r| matches!(r, AuditRecord::Interrupt { .. }))
-            .collect();
-        assert_eq!(interrupts.len(), 2);
-        assert!(records.iter().any(|r| matches!(
-            r,
-            AuditRecord::Interrupt { name, .. } if name == "config_changed"
-        )));
-    }
 }

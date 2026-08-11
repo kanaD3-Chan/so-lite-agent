@@ -7,5 +7,4 @@
 pub mod dispatch;
 pub mod session;
 
-#[path = "loop.rs"]
 pub mod r#loop;
