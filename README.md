@@ -67,15 +67,15 @@ Anthropic 兼容端点用 `AnthropicModelService`；自定义端点就是改 `ap
 
 | 模块 | 职责 |
 |---|---|
-| `agent/loop` | Agent loop：模型流式消费、串行工具执行、护栏、压缩、中断消费 |
+| `agent/loop` | Agent loop（types/engine）：模型流式消费、串行工具执行、护栏、压缩、中断消费 |
 | `agent/dispatch` | 统一执行入口：CallerPolicy 双墙、懒注册、schema 校验、超时/取消、审计 |
 | `agent/session` | SessionKey/Goal/SessionMeta、中断总线、摘要器、会话切换钩子 |
 | `contract` | 入口点元数据、CallerPolicy、ToolError、PluginError |
-| `registry` / `context` | 两段式插件契约（info + register）、懒注册、模型工具列表过滤 |
-| `services` | ServiceId、SessionStore 契约 + InMemory 实现、ServiceHandles |
-| `model` | ModelService 抽象、ModelChunk 归一化、ProviderRegistry、Mock |
+| `registry`（plugin/core）/ `context` | 两段式插件契约（info + register）、懒注册、模型工具列表过滤 |
+| `services`（handles/session） | ServiceId、SessionStore 契约 + InMemory 实现、ServiceHandles |
+| `model`（contract/handle/providers/mock） | ModelService 抽象、ModelChunk 归一化、ProviderRegistry、Mock |
 | `events` / `audit` / `message` | 事件流、审计记录、消息树 |
-| `builder` | KernelBuilder 装配入口 + Kernel 直连 API |
+| `builder`（assembly/kernel） | KernelBuilder 装配入口 + Kernel 直连 API |
 
 ## 里程碑状态
 

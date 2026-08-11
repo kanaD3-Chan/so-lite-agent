@@ -20,7 +20,7 @@ So Lite Agent（官方简写 **SL Agent**，crate 名 `so-lite-agent`）是面�
 | 你要做什么 | 先去读 | 重点内容 |
 |---|---|---|
 | 写 / 改插件 | docs/plugin-dev.md + examples/ | 两段式契约、enabled、目录编排、句柄注入 |
-| 写 / 改内核 | docs/kernel-dev.md + src/agent/、src/registry.rs | 模块地图、装配、调用链、扩展路径 |
+| 写 / 改内核 | docs/kernel-dev.md + src/agent/、src/registry/ | 模块地图、装配、调用链、扩展路径 |
 | 接模型 Provider | docs/api.md §5 + src/model/ | ModelService、注册表、内置适配器 |
 | 改 RPC / 事件 | docs/api.md §3-§4 + src/rpc.rs、src/events.rs | Method 子集、RpcExtension、Event::Custom |
 | 改设计 / 做架构决策 | docs/adr/ 全部 + CONTEXT.md | 决策留痕；新决策新增 ADR |

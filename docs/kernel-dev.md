@@ -27,11 +27,20 @@ so-lite-agent 是通用 Agent 运行时，不实现任何业务。它负责：
 ```text
 src/
 ├── lib.rs                    crate 出口与模块声明
-├── builder.rs                KernelBuilder 装配 + Kernel 直连 API + 默认值
+├── builder/
+│   ├── mod.rs                KernelBuilder / Kernel 公共面（pub use 重导出）
+│   ├── assembly.rs           KernelBuilder（默认服务自动补齐、插件注册 fail-fast）
+│   └── kernel.rs             Kernel 直连 API + 通用 RPC 入口
 ├── contract.rs               Info/EntryPoint/CallerPolicy/LoadPolicy/ToolError/PluginError
 ├── context.rs                PluginContext/KernelContext/EntryRegistrar
-├── registry.rs               注册表 + UserPlugin/KernelPlugin 两段式契约
-├── services.rs               ServiceId/ServiceHandles/SessionStore/InMemorySessionStore
+├── registry/
+│   ├── mod.rs                注册表公共面（pub use 重导出）
+│   ├── plugin.rs             UserPlugin/KernelPlugin/PluginDescriptor/RegisteredEntry
+│   └── core.rs               注册表：fail-fast 校验、懒注册、模型工具列表过滤
+├── services/
+│   ├── mod.rs                服务契约公共面（pub use 重导出）
+│   ├── handles.rs            ServiceId + ServiceHandles（类型化容器）
+│   └── session.rs            SessionStore 契约 + InMemorySessionStore + 活跃路径
 ├── events.rs                 Event 事件流（通用子集 + Custom 扩展口）
 ├── audit.rs                  AuditRecord/Auditor/AuditSink
 ├── message.rs                Message/MessageKind/MessageId/消息树辅助
@@ -39,10 +48,17 @@ src/
 ├── rpc.rs                    通用 RPC（RpcRequest/RpcFrame/Method/RpcExtension）
 ├── agent/
 │   ├── dispatch.rs           统一工具/命令执行（策略、校验、超时、审计）
-│   ├── loop.rs               Agent loop（护栏、压缩、中断消费、session::switch）
+│   ├── loop/
+│   │   ├── mod.rs            Agent loop 公共面（pub use 重导出）
+│   │   ├── types.rs          TurnInput/TurnOutcome/StopReason/CompactionInfo/LoopError
+│   │   └── engine.rs         AgentLoop（护栏、压缩、中断消费、session::switch）
 │   └── session.rs            SessionKey/Goal/InterruptBus/Summarizer/SessionSwitch
 └── model/
-    ├── mod.rs                ModelService/ModelChunk/ModelHandle/ProviderRegistry/Mock
+    ├── mod.rs                模型层公共面（pub use 重导出）
+    ├── contract.rs           ModelService/ModelRequest/ModelChunk/ModelError
+    ├── handle.rs             AbortSignal + ModelHandle（超时/abort/审计）
+    ├── providers.rs          ProviderRegistry + register_provider
+    ├── mock.rs               MockModelService（链路自检/测试）
     ├── openai.rs             OpenAI 兼容共享工具 + register_openai_compatible()
     ├── responses.rs          Responses API 流式适配器
     ├── completions.rs        Chat Completions 流式适配器
@@ -55,7 +71,7 @@ src/
 
 ## 3. 启动装配顺序
 
-入口是 `KernelBuilder::build()`（`src/builder.rs`）。顺序不能随意交换，因为组件之间存在依赖：
+入口是 `KernelBuilder::build()`（`src/builder/assembly.rs`）。顺序不能随意交换，因为组件之间存在依赖：
 
 1. 补齐默认值：事件 sink = `MemoryEventSink`、审计 sink = `MemoryAuditSink`、
    system_prompt = 空串 provider、摘要器 = `StubSummarizer`、会话切换 = 无（ADR-0003）；
