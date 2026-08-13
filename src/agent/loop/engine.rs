@@ -1,8 +1,12 @@
-//! AgentLoop：LLM 唯一决策者，kernel 执行工具调用（护栏/压缩/中断消费）。
+//! DefaultAgentLoop：LLM 唯一决策者，kernel 执行工具调用（护栏/压缩/中断消费）。
 //!
 //! 停止条件：模型自然停止 / 工具调用上限（默认 25）/ 相同失败连续 N 次（默认 3）/
 //! 单轮总超时 / 用户取消。系统提示由注入的 provider 生成（不落消息树，
 //! 每轮请求重新注入）。上下文压缩在回合边界按 75% 阈值触发。
+//!
+//! Capability seam（ADR-0006）：本类型是 [`super::AgentLoop`] trait 的默认
+//! **Provider** 实现；kernel 只依赖 `Arc<dyn AgentLoop>`，经
+//! `KernelBuilder::loop_engine` 可整体替换。
 
 use std::collections::BTreeMap;
 use std::sync::Arc;
@@ -21,6 +25,7 @@ use crate::model::{
     ItemKind, ModelChunk, ModelError, ModelKind, ModelRequest, ModelService, TokenUsage, ToolChoice,
 };
 
+use super::AgentLoop;
 use super::types::{
     CompactionInfo, InterruptReason, LoopError, StopReason, TurnInput, TurnOutcome,
 };
@@ -51,7 +56,7 @@ fn usage_opt(u: &TokenUsage) -> Option<TokenUsage> {
     }
 }
 
-pub struct AgentLoop {
+pub struct DefaultAgentLoop {
     model: Arc<dyn ModelService>,
     dispatch: Arc<Dispatch>,
     auditor: Auditor,
@@ -69,7 +74,7 @@ pub struct AgentLoop {
     switcher: Option<Arc<dyn SessionSwitch>>,
 }
 
-impl AgentLoop {
+impl DefaultAgentLoop {
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         model: Arc<dyn ModelService>,
@@ -117,7 +122,7 @@ impl AgentLoop {
         self
     }
 
-    pub async fn run_turn(&self, input: TurnInput) -> Result<TurnOutcome, LoopError> {
+    pub(crate) async fn run_turn_inner(&self, input: TurnInput) -> Result<TurnOutcome, LoopError> {
         // 回合边界消费环境变更中断：记录审计，上下文重组由调度层完成。
         for interrupt in self.bus.take_all() {
             log::info!("回合边界消费中断：{interrupt:?}");
@@ -528,6 +533,13 @@ impl AgentLoop {
         };
         *conversation = std::iter::once(sys).chain(tail).collect();
         Some(info)
+    }
+}
+
+#[async_trait::async_trait]
+impl AgentLoop for DefaultAgentLoop {
+    async fn run_turn(&self, input: TurnInput) -> Result<TurnOutcome, LoopError> {
+        self.run_turn_inner(input).await
     }
 }
 

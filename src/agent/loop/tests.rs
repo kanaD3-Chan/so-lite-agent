@@ -45,7 +45,11 @@ impl ModelService for ScriptedLoopModel {
 fn setup_loop(
     bus: InterruptBus,
     context_limit: usize,
-) -> (Arc<AgentLoop>, Arc<MemoryAuditSink>, Arc<MemoryEventSink>) {
+) -> (
+    Arc<DefaultAgentLoop>,
+    Arc<MemoryAuditSink>,
+    Arc<MemoryEventSink>,
+) {
     let events = Arc::new(MemoryEventSink::default());
     let sink = Arc::new(MemoryAuditSink::default());
     let auditor = Auditor::new(sink.clone());
@@ -62,7 +66,7 @@ fn setup_loop(
         events.clone(),
     ));
     let loop_engine = Arc::new(
-        AgentLoop::new(
+        DefaultAgentLoop::new(
             Arc::new(ScriptedLoopModel),
             dispatch,
             auditor,

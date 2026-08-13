@@ -29,7 +29,7 @@ fn rpc_error(e: &LoopError) -> RpcError {
 pub struct Kernel {
     registry: Arc<Registry>,
     dispatch: Arc<Dispatch>,
-    loop_engine: Arc<AgentLoop>,
+    loop_engine: Arc<dyn AgentLoop>,
     store: Arc<dyn SessionStore>,
     auditor: Auditor,
     events: Arc<dyn EventSink>,
@@ -45,7 +45,7 @@ impl Kernel {
     pub(crate) fn assemble(
         registry: Arc<Registry>,
         dispatch: Arc<Dispatch>,
-        loop_engine: Arc<AgentLoop>,
+        loop_engine: Arc<dyn AgentLoop>,
         store: Arc<dyn SessionStore>,
         auditor: Auditor,
         events: Arc<dyn EventSink>,

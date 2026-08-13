@@ -21,7 +21,7 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use crate::agent::dispatch::Dispatch;
-use crate::agent::r#loop::AgentLoop;
+use crate::agent::r#loop::{AgentLoop, DefaultAgentLoop};
 use crate::agent::session::{InterruptBus, SessionSwitch, StubSummarizer, Summarizer};
 use crate::audit::{AuditSink, Auditor, MemoryAuditSink};
 use crate::contract::PluginError;
@@ -51,6 +51,8 @@ pub struct KernelBuilder {
     grace: Duration,
     turn_budget: Duration,
     rpc_extensions: Vec<Arc<dyn RpcExtension>>,
+    /// 可替换的 agent loop（Capability seam，ADR-0006）；缺省用内置默认实现。
+    loop_engine: Option<Arc<dyn AgentLoop>>,
 }
 
 impl Default for KernelBuilder {
@@ -78,6 +80,7 @@ impl KernelBuilder {
             grace: Duration::from_secs(5),
             turn_budget: Duration::from_secs(10 * 60),
             rpc_extensions: Vec::new(),
+            loop_engine: None,
         }
     }
 
@@ -163,6 +166,15 @@ impl KernelBuilder {
         self
     }
 
+    /// 注入可替换的 agent loop（Capability seam，ADR-0006）：换 loop 不换内核其余部分。
+    /// 缺省使用内置默认实现（[`DefaultAgentLoop`]，护栏/压缩参数由本 builder 的
+    /// `max_tool_calls` / `context_limit_tokens` 等配置）。自定义实现需自行消费
+    /// `InterruptBus`（经 `Kernel::interrupt_bus` 可达）。
+    pub fn loop_engine(mut self, engine: Arc<dyn AgentLoop>) -> Self {
+        self.loop_engine = Some(engine);
+        self
+    }
+
     pub fn build(self) -> Result<Kernel, PluginError> {
         let logger: LoggerHandle = Arc::new(Logger);
         let auditor = Auditor::new(self.audit_sink);
@@ -207,20 +219,23 @@ impl KernelBuilder {
         let summarizer: Arc<dyn Summarizer> =
             self.summarizer.unwrap_or_else(|| Arc::new(StubSummarizer));
 
-        let loop_engine = Arc::new(
-            AgentLoop::new(
-                model,
-                dispatch.clone(),
-                auditor.clone(),
-                events.clone(),
-                system_prompt,
-                summarizer,
-                bus.clone(),
-                self.session_switch,
-            )
-            .with_compaction_limits(self.context_limit_tokens, self.compaction_keep_last)
-            .with_tool_guards(self.max_tool_calls, self.max_consecutive_failures),
-        );
+        let loop_engine: Arc<dyn AgentLoop> = match self.loop_engine {
+            Some(engine) => engine,
+            None => Arc::new(
+                DefaultAgentLoop::new(
+                    model,
+                    dispatch.clone(),
+                    auditor.clone(),
+                    events.clone(),
+                    system_prompt,
+                    summarizer,
+                    bus.clone(),
+                    self.session_switch,
+                )
+                .with_compaction_limits(self.context_limit_tokens, self.compaction_keep_last)
+                .with_tool_guards(self.max_tool_calls, self.max_consecutive_failures),
+            ),
+        };
 
         Ok(Kernel::assemble(
             registry,
