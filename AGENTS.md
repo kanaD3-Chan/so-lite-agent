@@ -2,7 +2,7 @@
 
 ## 项目速览
 
-So Lite Agent（官方简写 **SL Agent**，crate 名 `so-lite-agent`）是面向第三方开发者的开箱即用通用 Agent 运行时：agent loop、工具注册与调度、会话生命周期、模型 Provider 抽象与通用 RPC 随 crate 提供；**内核插件与用户插件由使用方自行编写**。Rust 2024 edition，单 crate。mistake-agent 是本仓库的参考实现与消费方（切换推迟到 v3 评估，见 [docs/adr/0001](docs/adr/0001-independent-repo-skip-m1.md)）。
+So Lite Agent（官方简写 **SL Agent**，crate 名 `so-lite-agent`）是面向第三方开发者的开箱即用通用 Agent 运行时：agent loop、工具注册与调度、会话生命周期、模型 Provider 抽象与通用 RPC 随 crate 提供；**内核插件与用户插件由使用方自行编写**。Rust 2024 edition，单 crate。pivot 后新增业务无关的通用 Agent 可执行文件（二进制 `sl-agent`，浏览器 Web 应用形态：HTTP/WS + 内嵌前端）与 Rune 脚本用户插件路径，内核能力仅由维护者编译进官方二进制（Linus 模式，见 [docs/adr/0006](docs/adr/0006-pivot-harness-and-rune.md)）。mistake-agent 是本仓库的参考实现与消费方（切换评估后移至 pivot 的 P3+，见 [docs/adr/0001](docs/adr/0001-independent-repo-skip-m1.md)）。
 
 ## 文档启动流程（每次开始工作前执行）
 

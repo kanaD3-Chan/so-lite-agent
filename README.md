@@ -1,6 +1,6 @@
 # So Lite Agent
 
-So Lite Agent 是开箱即用的通用 Agent 运行时（官方简写 **SL Agent**，crate 名为 `so-lite-agent`）：`cargo add so-lite-agent` 后即可上手开发自己的 Agent。
+So Lite Agent 是开箱即用的通用 Agent 运行时（官方简写 **SL Agent**，crate 名为 `so-lite-agent`）：`cargo add so-lite-agent` 后即可上手开发自己的 Agent；pivot 后同时以**浏览器 Web 应用**形态提供业务无关的通用 Agent 可执行文件（二进制 `sl-agent`：HTTP/WS 服务 + 内嵌前端），第三方以 Rune 脚本用户插件扩展、无需 cargo 构建；内核能力仅由维护者编译进官方二进制（Linus 模式，见 [ADR-0006](docs/adr/0006-pivot-harness-and-rune.md)）。
 
 参考 [earendil-works/pi](https://github.com/earendil-works/pi) 的分层——模型 Provider 层（pi-ai 等价物）与 Agent core 层（pi-agent-core 等价物）内置随包，领域层（业务插件）由使用方编写。mistake-agent 是本仓库的参考实现与消费方（保持独立，不做 M1 解耦，见 [ADR-0001](docs/adr/0001-independent-repo-skip-m1.md)）。
 
@@ -84,7 +84,11 @@ Anthropic 兼容端点用 `AnthropicModelService`；自定义端点就是改 `ap
 | M2 | 新仓库骨架：通用模块 + 默认服务，hello 回合（mock） | ✅（评审通过：消费者实测 + 门禁全绿） |
 | M3 | Provider 层：内置适配器 + register_provider | ✅（真实 API 验收通过） |
 | M4 | 通用 RPC + KernelBuilder 定型；插件手册/参考模板迁移 | ✅ |
-| M5 | 发布与切换（crates.io 上架除外） | ⏸ 推迟：切换留待 v3 评估 |
+| P1 | pivot 骨架：能力 seam 化（loop 可替换）+ Rune 用户插件桥 + `sl-agent` 服务入口（HTTP/WS + 浏览器最小聊天页） | ⏳ 待办（ADR-0006） |
+| P2 | Rune 插件一等支持（目录约定、热重载、事件/审计/RPC 桥）+ GUI 长全 | ⏳ 待办 |
+| P3 | 分发形态：web 打磨 / 配置组合 / mistake 迁移与切换评估（原 M5 内容后移） | ⏳ 评估 |
+
+> M5（发布与切换）已被 pivot 取代，详见 [docs/plan.md](docs/plan.md)。
 
 详见 [docs/plan.md](docs/plan.md)。
 

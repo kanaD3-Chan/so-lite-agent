@@ -5,7 +5,7 @@
 ## 命名
 
 **SL Agent（官方简写）**:
-so-lite-agent 的官方简写；另一种写法是 **So Lite Agent**。文档、标题与口头交流优先用 SL Agent；代码与包名仍是 `so-lite-agent` / `so_lite_agent`，不因简写改动。
+so-lite-agent 的官方简写；另一种写法是 **So Lite Agent**。文档、标题与口头交流优先用 SL Agent；代码与包名仍是 `so-lite-agent` / `so_lite_agent`，二进制名为 `sl-agent`（pivot 后以**浏览器 Web 应用**形态交付的业务无关通用 Agent 可执行文件：HTTP/WS 服务 + 内嵌前端，ADR-0006），不因简写改动。
 _Avoid_: SLA、LiteAgent、SL-Agent（连字符变体）
 
 ## 运行时结构
@@ -57,12 +57,16 @@ _Avoid_: SettingsChanged（业务命名）
 ## 插件与服务
 
 **Kernel plugin（内核插件）**:
-运行在内核信任边界内的特权子系统，负责敏感资源与能力（如会话存储、模型 Provider、业务服务）；经两段式契约注册，注册上下文为全量服务句柄。
+运行在内核信任边界内的特权子系统，负责敏感资源与能力（如会话存储、模型 Provider、业务服务）；经两段式契约注册，注册上下文为全量服务句柄。职责是**收紧权限与能力供给**（provides 服务、特权入口、护栏/压缩等运行时能力）。仅以 Rust 编写，且只由维护者编译进官方二进制（**Linus 模式**，ADR-0006）：不存在动态内核扩展机制（无 dll / 无签名脚本 / 无加载面），第三方需要新内核能力 = 交 PR 或 fork；crate 库形态下使用方自写内核插件编进自己的二进制（受信集成路径）。防篡改由「没有可加载物」保证。
 _Avoid_: 系统服务、内核级插件（口语）
 
 **User plugin（用户插件）**:
-通过内核注册工具、命令与事件回调提供业务能力的插件；回调由 kernel 主动调用，只经服务句柄访问资源。
+通过内核注册工具、命令与事件回调提供业务能力的插件，职责是**扩展 Agent 业务功能**；回调由 kernel 主动调用，只经服务句柄访问资源。两种编写路径共享同一契约：Rust（编译期，不变）与 Rune 脚本（运行时加载，pivot 后的一等路径，ADR-0006）。
 _Avoid_: 业务插件（过早限定业务范围）
+
+**Rune user plugin（Rune 脚本插件）**:
+用户插件的脚本编写路径（eBPF 模型：安全 VM + 宿主函数白名单）：同一两段式契约（info 结构化声明 + register 经宿主函数绑定 handler），以 Rune 脚本随可执行文件分发、运行时加载；**requires 决定宿主装哪些函数**——脚本结构性拿不到未声明能力（防越权），明文可改也不怕（篡改只能在白名单内作恶，防篡改不是用户层目标）；enabled 缺省 false、wire 名全局唯一等校验与 Rust 路径一致（ADR-0006）。
+_Avoid_: 脚本工具（只指入口点）、动态插件（含义过宽）
 
 **Service（服务）**:
 内核插件向 kernel 提供的受控能力，在 info 中以 `provides` 声明；用户插件只能通过服务句柄访问。
@@ -75,6 +79,10 @@ _Avoid_: 服务名（无唯一性语义）
 **Service handle（服务句柄）**:
 kernel 按能力声明注入插件的受限接口；会话/模型走类型化句柄，自定义服务走类型擦除包 + downcast。
 _Avoid_: 全局单例、直接依赖
+
+**Capability seam（能力 seam）**:
+可替换能力的三角角色结构：Service Definition（声明接口）、Service Provider（实现）、Consumer（消费方，通常是面向模型的工具）；换 provider 不换 consumer（如模型、会话存储、loop）。pivot 后内核能力逐步 seam 化（ADR-0006），替换一个 provider 即可改变整个运行时行为。
+_Avoid_: 服务（单角色）、插件（只是角色之一）
 
 **Plugin directory（插件目录）**:
 插件的推荐组织方式：一插件一目录，mod.rs 承载两段式契约（info + register + descriptor），子模块放 handler 实现；禁用插件 = `enabled` 缺省 false，注册表跳过（聚合点可保留注册行）。

@@ -3,7 +3,9 @@
 > 目标：mistake-agent 的通用 Agent 运行时换成 so-lite-agent，删除本仓库重复代码，双端回归通过。
 > 这是对 mistake-agent 的正式修改（此前 ADR-0001 冻结了它，M5 是计划中的解除时机）。
 
-> **状态：已推迟到 v3**（2026-08-07 决策）——mistake-agent 本仓库保持冻结，M5 不落地；本文作为 v3 候选实施蓝图保留。
+> **状态：已被 pivot 取代**（2026-08-13，ADR-0006）——pivot 将定位转为可执行
+> harness + Rune 脚本扩展，M5 的 crates.io 上架与 mistake-agent 切换后移至 P3 评估；
+> 本文保留为历史蓝图，实施前需按 pivot 后架构重新评估差距清单。
 
 ## 差距清单
 
