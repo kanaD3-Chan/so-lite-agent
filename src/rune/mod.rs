@@ -9,14 +9,17 @@
 //! - rune `Value` 与 `serde_json::Value` 双向转换（rune Value 自带
 //!   Serialize/Deserialize，无需额外 feature）。
 //!
-//! 插件契约（info() 结构化声明 + register() 绑定 + requires 白名单注入）在
-//! P1 检查点对齐后实现（`plugin` 子模块）；本模块只承载与契约无关的宿主机制。
+//! 插件契约在 [`plugin`]：manifest.json（纯数据 info 声明）+ plugin.rn
+//! （register + handlers），按 requires 结构性裁剪宿主函数
+//! （P1 检查点结论 a1/b1/c2/d1）。
 //!
 //! 许可：rune（MIT OR Apache-2.0）与本 crate（AGPL-3.0）兼容；本模块为独立实现，
 //! 不复制 rune 源码（ADR-0006 影响分析）。
 
 mod host;
+mod plugin;
 mod vm;
 
 pub use host::HostError;
+pub use plugin::{ScriptPlugin, ScriptPluginHandle};
 pub use vm::{CallError, CompileError, ScriptVm};

@@ -53,6 +53,9 @@ pub struct KernelBuilder {
     rpc_extensions: Vec<Arc<dyn RpcExtension>>,
     /// 可替换的 agent loop（Capability seam，ADR-0006）；缺省用内置默认实现。
     loop_engine: Option<Arc<dyn AgentLoop>>,
+    /// Rune 脚本用户插件（ADR-0006；feature rune-plugins）。
+    #[cfg(feature = "rune-plugins")]
+    script_plugins: Vec<crate::rune::ScriptPlugin>,
 }
 
 impl Default for KernelBuilder {
@@ -81,6 +84,8 @@ impl KernelBuilder {
             turn_budget: Duration::from_secs(10 * 60),
             rpc_extensions: Vec::new(),
             loop_engine: None,
+            #[cfg(feature = "rune-plugins")]
+            script_plugins: Vec::new(),
         }
     }
 
@@ -175,6 +180,14 @@ impl KernelBuilder {
         self
     }
 
+    /// 注册一个 Rune 脚本用户插件（ADR-0006）：目录形态（manifest.json + plugin.rn）
+    /// 经 [`ScriptPlugin::from_dir`] 加载后交给本方法；编译失败在 build() 时 fail-fast。
+    #[cfg(feature = "rune-plugins")]
+    pub fn script_plugin(mut self, plugin: crate::rune::ScriptPlugin) -> Self {
+        self.script_plugins.push(plugin);
+        self
+    }
+
     pub fn build(self) -> Result<Kernel, PluginError> {
         let logger: LoggerHandle = Arc::new(Logger);
         let auditor = Auditor::new(self.audit_sink);
@@ -199,6 +212,22 @@ impl KernelBuilder {
         }
         for desc in self.plugins {
             registry.register_plugin(desc)?;
+        }
+        #[cfg(feature = "rune-plugins")]
+        {
+            // Rune 脚本插件：编译 + 白名单 fail-fast，再走同一张注册表校验。
+            let (handlers_arc, wire_arc) = registry.targets_arc();
+            for plugin in self.script_plugins {
+                let handle = crate::rune::ScriptPluginHandle::new(
+                    plugin,
+                    &handles,
+                    self.event_sink.clone(),
+                    logger.clone(),
+                    handlers_arc.clone(),
+                    wire_arc.clone(),
+                )?;
+                registry.register_script(handle)?;
+            }
         }
 
         let events = self.event_sink;

@@ -8,6 +8,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::model::ModelHandle;
 
+use super::dynamic::DynamicService;
 use super::session::SessionHandle;
 
 /// Capability seam（ADR-0006）：Service Definition 的能力标识。
@@ -43,12 +44,15 @@ impl std::fmt::Display for ServiceId {
 
 /// Capability seam（ADR-0006）：Service Provider 容器。
 /// 服务句柄容器：会话/模型两个内置服务走类型化槽位，业务服务走类型擦除包，
-/// 插件侧用 [`ServiceHandles::get_custom`] 做运行时 downcast 取回。
+/// 插件侧用 [`ServiceHandles::get_custom`] 做运行时 downcast 取回；
+/// 另设 dynamic 槽位：实现 [`DynamicService`] 的业务服务可被 Rune 脚本插件
+/// 按 method + JSON 参数调用（脚本无具体类型，见 `services::dynamic`）。
 #[derive(Default, Clone)]
 pub struct ServiceHandles {
     session: Option<SessionHandle>,
     model: Option<ModelHandle>,
     custom: HashMap<ServiceId, Arc<dyn Any + Send + Sync>>,
+    dynamic: HashMap<ServiceId, Arc<dyn DynamicService>>,
 }
 
 impl ServiceHandles {
@@ -66,6 +70,11 @@ impl ServiceHandles {
             .and_then(|v| v.clone().downcast::<T>().ok())
     }
 
+    /// 取动态调用句柄（Rune 脚本桥用；无 dynamic 实现时返回 None）。
+    pub fn get_dynamic(&self, id: &ServiceId) -> Option<Arc<dyn DynamicService>> {
+        self.dynamic.get(id).cloned()
+    }
+
     pub fn with_session(mut self, h: SessionHandle) -> Self {
         self.session = Some(h);
         self
@@ -81,6 +90,13 @@ impl ServiceHandles {
         self
     }
 
+    /// 注入动态调用实现（供脚本插件按 method + JSON 调用；可与
+    /// `with_custom` 同 id 并存——Rust 插件仍走 downcast，脚本走 dynamic）。
+    pub fn with_dynamic(mut self, id: ServiceId, h: Arc<dyn DynamicService>) -> Self {
+        self.dynamic.insert(id, h);
+        self
+    }
+
     pub fn available(&self) -> HashSet<ServiceId> {
         let mut set = HashSet::new();
         if self.session.is_some() {
@@ -90,6 +106,7 @@ impl ServiceHandles {
             set.insert(ServiceId::model());
         }
         set.extend(self.custom.keys().cloned());
+        set.extend(self.dynamic.keys().cloned());
         set
     }
 
@@ -103,6 +120,8 @@ impl ServiceHandles {
                 out.model = self.model.clone();
             } else if let Some(v) = self.custom.get(id) {
                 out.custom.insert(id.clone(), v.clone());
+            } else if let Some(v) = self.dynamic.get(id) {
+                out.dynamic.insert(id.clone(), v.clone());
             }
         }
         out

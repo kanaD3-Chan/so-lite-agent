@@ -13,9 +13,20 @@ use crate::services::{ServiceHandles, ServiceId};
 
 use super::plugin::{EntryKind, KernelDescriptor, PluginDescriptor, RegisteredEntry};
 
+/// 注册表写目标（handlers 表 + wire 反查表）的 Arc 句柄（脚本桥用）。
+#[cfg(feature = "rune-plugins")]
+type TargetsArc = (
+    Arc<RwLock<HashMap<String, RegisteredEntry>>>,
+    Arc<RwLock<HashMap<String, String>>>,
+);
+
 enum PluginBody {
     User(fn(PluginContext<'_>) -> Result<(), PluginError>),
     Kernel(fn(KernelContext<'_>) -> Result<(), PluginError>),
+    /// Rune 脚本插件（ADR-0006）：manifest 声明 + 脚本 register() 绑定。
+    /// 与 User 同信任边界（requires 过滤），宿主函数白名单在桥内构造。
+    #[cfg(feature = "rune-plugins")]
+    Script(Arc<crate::rune::ScriptPluginHandle>),
 }
 
 struct PluginEntry {
@@ -26,8 +37,10 @@ struct PluginEntry {
 
 pub struct Registry {
     entries: RwLock<HashMap<String, Arc<PluginEntry>>>,
-    handlers: RwLock<HashMap<String, RegisteredEntry>>,
-    wire_to_full: RwLock<HashMap<String, String>>,
+    /// Arc 化：脚本插件宿主函数需要持引用（Rune 用户插件桥，ADR-0006）；
+    /// 对 Rust 路径透明（deref 语义不变）。
+    handlers: Arc<RwLock<HashMap<String, RegisteredEntry>>>,
+    wire_to_full: Arc<RwLock<HashMap<String, String>>>,
     services: ServiceHandles,
     logger: LoggerHandle,
 }
@@ -36,11 +49,17 @@ impl Registry {
     pub fn new(services: ServiceHandles, logger: LoggerHandle) -> Self {
         Self {
             entries: RwLock::new(HashMap::new()),
-            handlers: RwLock::new(HashMap::new()),
-            wire_to_full: RwLock::new(HashMap::new()),
+            handlers: Arc::new(RwLock::new(HashMap::new())),
+            wire_to_full: Arc::new(RwLock::new(HashMap::new())),
             services,
             logger,
         }
+    }
+
+    /// 注册表写目标的 Arc 句柄（Rune 脚本桥绑定入口点用）。
+    #[cfg(feature = "rune-plugins")]
+    pub(crate) fn targets_arc(&self) -> TargetsArc {
+        (self.handlers.clone(), self.wire_to_full.clone())
     }
 
     pub fn logger(&self) -> &LoggerHandle {
@@ -57,6 +76,17 @@ impl Registry {
     /// 内核插件是服务的提供者，register 收到全量句柄；provides 声明服务身份且不得重复。
     pub fn register_kernel_plugin(&self, desc: KernelDescriptor) -> Result<(), PluginError> {
         self.register_inner(desc.info, PluginBody::Kernel(desc.register))
+    }
+
+    /// 注册 Rune 脚本用户插件（ADR-0006）：manifest 声明已校验，编译已失败即报错
+    /// （fail-fast 与 Rust 路径一致）；register() 绑定推迟到懒加载。
+    #[cfg(feature = "rune-plugins")]
+    pub fn register_script(
+        &self,
+        handle: crate::rune::ScriptPluginHandle,
+    ) -> Result<(), PluginError> {
+        let info = handle.info().clone();
+        self.register_inner(info, PluginBody::Script(Arc::new(handle)))
     }
 
     fn register_inner(&self, info: Info, body: PluginBody) -> Result<(), PluginError> {
@@ -194,6 +224,8 @@ impl Registry {
                 };
                 register(ctx)
             }
+            #[cfg(feature = "rune-plugins")]
+            PluginBody::Script(handle) => handle.register(),
         };
         if result.is_err() {
             entry.loaded.store(false, Ordering::SeqCst);

@@ -95,6 +95,28 @@ impl ScriptVm {
             .map_err(|e| CallError(e.to_string()))
     }
 
+    /// 同步调脚本函数（0/1/2 个参数）：脚本 `register()` 绑定用——
+    /// 绑定宿主函数是同步的，register() 不得 await（异步宿主函数只在 handler 里用）。
+    pub fn call_sync(&self, name: &str, args: &[Value]) -> Result<Value, CallError> {
+        let mut vm = Vm::new(self.runtime.clone(), self.unit.clone());
+        let mut execution = match args.len() {
+            0 => vm
+                .execute([name], ())
+                .map_err(|e| CallError(e.to_string()))?,
+            1 => vm
+                .execute([name], (args[0].clone(),))
+                .map_err(|e| CallError(e.to_string()))?,
+            2 => vm
+                .execute([name], (args[0].clone(), args[1].clone()))
+                .map_err(|e| CallError(e.to_string()))?,
+            n => return Err(CallError(format!("最多支持 2 个参数，收到 {n}"))),
+        };
+        execution
+            .complete()
+            .into_result()
+            .map_err(|e| CallError(e.to_string()))
+    }
+
     /// 调脚本函数并转成 JSON（rune Value ↔ serde_json）。
     pub async fn call_json(
         &self,
