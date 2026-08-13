@@ -10,6 +10,7 @@ use crate::model::ModelHandle;
 
 use super::session::SessionHandle;
 
+/// Capability seam（ADR-0006）：Service Definition 的能力标识。
 /// 服务标识：字符串背书的 newtype，内置会话/模型，业务服务用 [`ServiceId::custom`]。
 /// 注册表按 `provides` 全局唯一（ADR-0002 混合式设计）。
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -40,6 +41,7 @@ impl std::fmt::Display for ServiceId {
     }
 }
 
+/// Capability seam（ADR-0006）：Service Provider 容器。
 /// 服务句柄容器：会话/模型两个内置服务走类型化槽位，业务服务走类型擦除包，
 /// 插件侧用 [`ServiceHandles::get_custom`] 做运行时 downcast 取回。
 #[derive(Default, Clone)]

@@ -160,6 +160,7 @@ impl ModelError {
 
 pub type ModelStream = Box<dyn Stream<Item = Result<ModelChunk, ModelError>> + Send + Unpin>;
 
+/// Capability seam（ADR-0006）：model 能力的 Service Definition。
 /// 纯净 provider 抽象（不管超时/审计；护栏在包装层与 loop）。
 #[async_trait]
 pub trait ModelService: Send + Sync {

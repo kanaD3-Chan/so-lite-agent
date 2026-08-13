@@ -22,7 +22,33 @@ so-lite-agent 是通用 Agent 运行时，不实现任何业务。它负责：
 业务（错题、记忆、验算、settings、GUI 协议等）由使用方以插件、自定义服务和 `RpcExtension`
 实现（ADR-0004 通用边界），不进入 crate。
 
-## 2. 模块地图
+## 2. 能力 seam（Service Definition / Provider / Consumer）
+
+pivot（ADR-0006）后，可替换能力形式化为三角角色——**换 Provider 不换 Consumer**，
+替换一个能力即可改变整个运行时行为（对标 DeepSeek Harness 的「一切皆插件 + 能力可替换」，
+但装配仍是本 crate 的编译期显式链式注册，配置驱动组合推迟评估）：
+
+| 角色 | 职责 | 本 crate 落点 |
+|---|---|---|
+| **Service Definition** | 能力接口（契约） | `SessionStore` / `ModelService` / `AgentLoop` trait、`ServiceId`（能力标识） |
+| **Service Provider** | 能力实现（替换点） | `InMemorySessionStore` / `MockModelService`+适配器 / `DefaultAgentLoop`、`ServiceHandles` 容器 |
+| **Consumer** | 能力消费方（通常面向模型/loop） | `Dispatch`（调用入口）、`AgentLoop::run_turn`（消费 model/session） |
+
+实例对照：
+
+- **model seam**：Definition = `ModelService`（流式协议归一化）；Provider = `MockModelService` /
+  OpenAI 兼容 / Anthropic 适配器（经 `register_openai_compatible` 接线，包 `ModelHandle`）；
+  Consumer = `AgentLoop`（唯一消费方）。
+- **session seam**：Definition = `SessionStore`（持久化契约）；Provider = `InMemorySessionStore`
+  （文件实现由使用方提供）；Consumer = `Kernel` / `AgentLoop`（消息树与压缩接入存储链）。
+- **loop seam**：Definition = `AgentLoop` trait（`run_turn`）；Provider = `DefaultAgentLoop`
+  （内置默认实现，经 `KernelBuilder::loop_engine` 可替换）；Consumer = `Kernel::send_user_message` /
+  通用 RPC `send_user_message`。
+
+代码侧以 rustdoc 标注（`/// Capability seam: ...`）；新增可替换能力时按同一三角落位，
+不要在 Consumer 里 new 具体 Provider。
+
+## 3. 模块地图
 
 ```text
 src/
@@ -69,7 +95,7 @@ src/
 `model/` 一目录一职责，`openai.rs` 拆出两种传输协议）。子模块间共享的私有项经父模块
 `pub(crate) use` 桥接。
 
-## 3. 启动装配顺序
+## 4. 启动装配顺序
 
 入口是 `KernelBuilder::build()`（`src/builder/assembly.rs`）。顺序不能随意交换，因为组件之间存在依赖：
 
@@ -88,7 +114,7 @@ src/
 新增一个需要启动依赖的内核组件，应在 `KernelBuilder` 完成实例化和注入，再经插件/句柄暴露；
 不要在 handler 第一次调用时偷偷创建全局单例。
 
-## 4. 插件注册与能力边界
+## 5. 插件注册与能力边界
 
 ### 4.1 两段式契约
 
@@ -120,7 +146,7 @@ KernelBuilder::new().register_plugin(desc);
 - `PluginContext.handles`：只含 `requires` 声明过的服务（结构性受限，无运行时检查可绕）；
 - `KernelContext.handles`：全量句柄（内核插件在信任边界内，是服务的提供者）。
 
-## 5. 服务句柄
+## 6. 服务句柄
 
 `ServiceId` 是字符串背书的 newtype：内置 `session()` / `model()`，业务服务用
 `custom(name)`。`ServiceHandles` 为会话、模型保留类型化槽位（`with_session` /
@@ -139,7 +165,7 @@ KernelBuilder::new().register_plugin(desc);
 > 本 crate 不含文件 IO 语义（mistake-agent 的 `DomainIo`/`TmpIo`/`RelPath` 是应用侧设计）。
 > 使用方需要落盘时，自行实现 `SessionStore` / `AuditSink` / 日志后端，或在自己的服务句柄里封装。
 
-## 6. Dispatch 调用链
+## 7. Dispatch 调用链
 
 所有模型工具和用户命令都经过 `Dispatch`：
 
@@ -159,9 +185,11 @@ Caller
   受回合预算钳制）、`TurnControl`（请求内部中断）、`LoggerHandle` 与 `EventSink`（进度播报）；
 - 同一轮多个工具调用**串行执行**（v2 设计，ADR-0010 对应语义在 crate 内保持）。
 
-## 7. Agent loop
+## 8. Agent loop
 
-`AgentLoop::run_turn` 是 LLM 唯一决策循环：
+loop 是**可替换能力**（Capability seam，见 §2）：`AgentLoop` trait 的 `run_turn` 是
+LLM 唯一决策循环；`DefaultAgentLoop` 是内置默认实现（`KernelBuilder::loop_engine`
+可注入替换）。`run_turn` 流程：
 
 1. 回合边界消费 `InterruptBus` 中断并记录审计；
 2. 注入系统提示（`system_prompt` provider 每轮调用，不落消息树）；
@@ -182,7 +210,7 @@ Caller
 `session::switch` 是 loop 特殊处理的入口：不走普通 handler，而是调用注入的
 `SessionSwitch` 钩子，切换后的新会话键回填到 `TurnOutcome.session_key`。
 
-## 8. 会话与消息树
+## 9. 会话与消息树
 
 `SessionStore` 是通用持久化契约（`InMemorySessionStore` 为默认实现，文件实现由使用方提供）：
 
@@ -198,7 +226,7 @@ Caller
 与 `Summarizer`（`KernelBuilder::summarizer` 注入）；`session::switch` 工具也由使用方注册
 （参照 [docs/plugin-dev.md](plugin-dev.md)）。
 
-## 9. RPC 与事件
+## 10. RPC 与事件
 
 `src/rpc.rs` 提供通用 RPC：`RpcRequest`（id + `Method`）+ `RpcFrame`（Response/Event）。
 通用 `Method` 子集：`send_user_message` / `trigger_command` / `edit_message` /
@@ -213,7 +241,7 @@ Caller
 新增业务 RPC/事件优先走 `RpcExtension` / `Event::Custom`；不要往通用 `Method` / `Event`
 里塞业务字段。
 
-## 10. 扩展路径
+## 11. 扩展路径
 
 ### 新增自定义服务
 
@@ -238,7 +266,7 @@ Caller
 - 摘要器：`KernelBuilder::summarizer(Arc<dyn Summarizer>)`；
 - 会话切换：`KernelBuilder::session_switch(Arc<dyn SessionSwitch>)`。
 
-## 11. 验证清单
+## 12. 验证清单
 
 ```bash
 cargo fmt --check
@@ -251,7 +279,7 @@ cargo test --test live_api -- --ignored   # 真实 API（key 只从本地配置�
 涉及模型协议、注册表、loop、会话或 RPC 的改动，不能只依赖 mock 单测；必须补真实链路或
 现有 `live_api` 覆盖。
 
-## 12. 设计红线
+## 13. 设计红线
 
 - 单 crate；通用运行时不实现业务，业务领域类型不进 crate；
 - 用户插件不直触资源（只能经 `requires` 句柄）；内核插件特权入口经 `KernelContext`；

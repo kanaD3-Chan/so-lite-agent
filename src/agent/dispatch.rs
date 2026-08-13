@@ -87,6 +87,8 @@ pub struct ToolCallContext {
     pub events: Arc<dyn EventSink>,
 }
 
+/// Capability seam（ADR-0006）：入口点能力的 Consumer（统一执行入口）——
+/// Caller 检查 → 懒注册 → 参数校验 → 超时/取消 → 审计。
 pub struct Dispatch {
     registry: Arc<Registry>,
     auditor: Auditor,

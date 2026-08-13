@@ -47,6 +47,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 | `compaction_keep_last(usize)` | 压缩保留的最近消息数 | 15 |
 | `default_tool_timeout(Duration)` | 工具默认超时 | 30s |
 | `turn_budget(Duration)` | 单回合总预算 | 10min |
+| `loop_engine(Arc<dyn AgentLoop>)` | 注入可替换的 agent loop（Capability seam，ADR-0006）；缺省为内置默认实现 | 内置 `DefaultAgentLoop` |
 | `rpc_extension(Arc<dyn RpcExtension>)` | 业务 RPC 方法扩展 | 无 |
 
 ## 3. Kernel 直连 API

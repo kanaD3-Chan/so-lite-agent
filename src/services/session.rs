@@ -22,6 +22,7 @@ pub enum SessionError {
     Internal(String),
 }
 
+/// Capability seam（ADR-0006）：session 能力的 Service Definition（持久化契约）。
 /// 会话持久化：kernel 内部（Session scheduler / loop / 压缩）使用。
 #[async_trait]
 pub trait SessionStore: Send + Sync {

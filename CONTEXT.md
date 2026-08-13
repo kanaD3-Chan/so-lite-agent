@@ -81,7 +81,7 @@ kernel 按能力声明注入插件的受限接口；会话/模型走类型化句
 _Avoid_: 全局单例、直接依赖
 
 **Capability seam（能力 seam）**:
-可替换能力的三角角色结构：Service Definition（声明接口）、Service Provider（实现）、Consumer（消费方，通常是面向模型的工具）；换 provider 不换 consumer（如模型、会话存储、loop）。pivot 后内核能力逐步 seam 化（ADR-0006），替换一个 provider 即可改变整个运行时行为。
+可替换能力的三角角色结构：Service Definition（声明接口）、Service Provider（实现）、Consumer（消费方，通常是面向模型的工具）；换 provider 不换 consumer（如模型、会话存储、loop）。pivot 后内核能力逐步 seam 化（ADR-0006），替换一个 provider 即可改变整个运行时行为。现有实例：**model seam**（`ModelService` Definition → 适配器/Mock Provider → loop Consumer）、**session seam**（`SessionStore` Definition → `InMemorySessionStore` Provider → Kernel/loop Consumer）、**loop seam**（`AgentLoop` trait Definition → `DefaultAgentLoop` Provider → Kernel 直连/RPC Consumer，经 `KernelBuilder::loop_engine` 替换）。
 _Avoid_: 服务（单角色）、插件（只是角色之一）
 
 **Plugin directory（插件目录）**:
