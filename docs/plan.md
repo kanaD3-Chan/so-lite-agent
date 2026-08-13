@@ -106,4 +106,5 @@ requires 句柄）端到端注册并调用；AgentLoop trait 化后默认实现�
 - 会话事实日志词汇扩展评估：turn/step、raw chunk、tool 生命周期、compaction 锁、
   fork（由 mistake 迁移需求反推，ADR-0007 第三步）；
 - mistake-agent 非特权业务迁移为 Rune 用户插件评估（其内核级业务留在自己二进制）；
-- crates.io 上架与 mistake-agent 切换重新评估（原 M5 内容后移至此）。
+- **crates.io 上架：不评估（ADR-0009，✅ 决策已留痕）**——定位已转为可执行文件
+  项目，不发布 crates.io；mistake-agent 切换评估保留（原 M5 内容）。

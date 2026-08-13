@@ -1,20 +1,32 @@
 # So Lite Agent
 
-So Lite Agent 是开箱即用的通用 Agent 运行时（官方简写 **SL Agent**，crate 名为 `so-lite-agent`）：`cargo add so-lite-agent` 后即可上手开发自己的 Agent；pivot 后同时以**浏览器 Web 应用**形态提供业务无关的通用 Agent 可执行文件（二进制 `sl-agent`：HTTP/WS 服务 + 内嵌前端），第三方以 Rune 脚本用户插件扩展、无需 cargo 构建；内核能力仅由维护者编译进官方二进制（Linus 模式，见 [ADR-0006](docs/adr/0006-pivot-harness-and-rune.md)）。
+So Lite Agent 是**可执行文件项目**（官方简写 **SL Agent**，ADR-0009 不发布
+crates.io）：主交付 = 业务无关的通用 Agent 可执行文件（二进制 `sl-agent`，浏览器
+Web 应用形态：HTTP/WS 服务 + 内嵌前端），第三方以 Rune 脚本用户插件扩展、无需
+cargo 构建；内核能力仅由维护者编译进官方二进制（Linus 模式，见
+[ADR-0006](docs/adr/0006-pivot-harness-and-rune.md)）。源码仍是 Rust crate
+（crate 名 `so-lite-agent`，workspace 化后为引擎 crate，ADR-0008），作为仓库
+内部依赖存在，不做公共发布。
 
-参考 [earendil-works/pi](https://github.com/earendil-works/pi) 的分层——模型 Provider 层（pi-ai 等价物）与 Agent core 层（pi-agent-core 等价物）内置随包，领域层（业务插件）由使用方编写。mistake-agent 是本仓库的参考实现与消费方（保持独立，不做 M1 解耦，见 [ADR-0001](docs/adr/0001-independent-repo-skip-m1.md)）。
+参考 [earendil-works/pi](https://github.com/earendil-works/pi) 的分层——模型
+Provider 层与 Agent core 层内置随包，领域层（业务插件）由使用方编写。
+mistake-agent 是本仓库的参考实现（保持独立二进制，见
+[ADR-0001](docs/adr/0001-independent-repo-skip-m1.md)）。
 
-> **只做 Agent 的开发者**：`cargo add so-lite-agent` 后按 [docs/plugin-dev.md](docs/plugin-dev.md)
-> 写内核/用户插件即可上手，**无需理解内核设计**；内核细节（[docs/kernel-dev.md](docs/kernel-dev.md)）
-> 只给维护者/深度集成者，接口参考见 [docs/api.md](docs/api.md)。
+> **要开发自己的 Agent？** 看 [docs/agent-dev-guide.md](docs/agent-dev-guide.md)：
+> 两条路线（sl-agent 扩展者 = 写 Rune 脚本 / fork 定制者 = 改 Rust 内核插件），
+> 从零到跑通。内核细节（[docs/kernel-dev.md](docs/kernel-dev.md)）只给维护者/
+> 深度集成者，接口参考见 [docs/api.md](docs/api.md)。
 
-## 快速开始
+## 快速开始（fork / 源码运行）
 
 ```bash
-cargo add so-lite-agent
+cargo test --all-targets --all-features   # 门禁自检
+cargo run --bin sl-agent --features server,rune-plugins
 ```
 
 ```rust
+// examples/hello.rs：最小内核 + hello 回合（fork 定制者在自己的二进制里这么装配）
 use so_lite_agent::builder::KernelBuilder;
 use so_lite_agent::events::MemoryEventSink;
 use std::sync::Arc;
@@ -68,27 +80,12 @@ Rune 脚本用户插件放 `./plugins/`（一插件一目录：`manifest.json` �
 `plugins/demo/` 示例。内核能力仅由维护者编译进官方二进制（Linus 模式），
 第三方扩展业务 = 写 Rune 脚本，无需 cargo 构建。
 
-## 快速开始：`sl-agent` 可执行文件（浏览器 Web 应用，ADR-0006）
-
-```bash
-cargo run --bin sl-agent --features server,rune-plugins   # 打开 http://127.0.0.1:8080
-```
-
-零配置即跑通 hello 回合（默认 `MockModelService`）；接真实模型：
-
-```bash
-SL_AGENT_API_URL=https://api.deepseek.com SL_AGENT_API_KEY=xxx SL_AGENT_MODEL=deepseek-chat \
-  SL_AGENT_PORT=8080 cargo run --bin sl-agent --features server,rune-plugins
-```
-
-Rune 脚本用户插件放 `./plugins/`（一插件一目录：`manifest.json` 声明 + `plugin.rn`
-脚本，目录名即 namespace，见 [docs/plugin-dev.md](docs/plugin-dev.md)）；本仓库自带
-`plugins/demo/` 示例。内核能力仅由维护者编译进官方二进制（Linus 模式），
-第三方扩展业务 = 写 Rune 脚本，无需 cargo 构建。
+> **要基于本项目开发自己的 Agent？** 看 [docs/agent-dev-guide.md](docs/agent-dev-guide.md)
+> ——按路线选型（sl-agent 扩展者 / fork 定制者）从零到跑通。
 
 ## 开发上手
 
-- 只做 Agent：`cargo add so-lite-agent` → 按 [docs/plugin-dev.md](docs/plugin-dev.md) 写插件（不需要懂内核）；
+- 只做 Agent：按 [docs/agent-dev-guide.md](docs/agent-dev-guide.md) 选路线（Rune 扩展 / fork 定制）；
 - 先跑 [examples/hello.rs](examples/hello.rs)：最小内核 + hello 回合；
 - 再跑 [examples/plugins.rs](examples/plugins.rs)：自定义服务 + 内核插件 + 用户插件端到端（脚本化模型模拟两次工具调用）；
 - 目录编排见 [examples/folder_plugins](examples/folder_plugins/main.rs)：一插件一目录（mod.rs 契约 + core.rs 实现）+ 聚合点；

@@ -49,8 +49,8 @@ so-lite-agent/                 workspace 根（[workspace] members）
 - **crate 边界即信任边界**：插件 crate 可以带自己的依赖（如 storage 的
   `uuid`、`chrono`），不回流引擎；引擎 crate 的公共面（RPC 子集、事件子集、
   ServiceId、SessionStore 契约）保持通用。
-- **lib 形态保留**：`crates/engine` 仍是可 `cargo add so-lite-agent` 的库
-  （M2 验收不变）；workspace 化不影响库消费者。
+- **engine 是内部 crate，不发布**：`crates/engine` 作为 workspace 内部依赖存在，
+  不面向 `cargo add` 库消费者（ADR-0009：不发布 crates.io，定位为可执行文件项目）。
 
 ## 影响与边界
 

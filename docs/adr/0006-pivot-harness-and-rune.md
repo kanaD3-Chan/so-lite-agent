@@ -1,6 +1,6 @@
 # 转向可执行 harness：Linus 内核模式 + Rune 用户插件 + 浏览器 Web GUI（pivot）
 
-DeepSeek Harness（MIT）发布后，其「一切皆插件 + 能力可替换（agent loop 本身也是插件）+ 事件即扩展点 + 运行时组合」被验证为通用 agent 运行时的正确形态。对照本 crate：能力三角（Service Definition / Provider / Consumer）已有雏形但未形式化，loop 焊死在 Kernel 内不可替换，事件只做播报没有拦截语义，装配是编译期代码链。**定位决策**：so-lite-agent 从「cargo add 库」转向「业务无关的通用 Agent 可执行文件」——二进制 `sl-agent` 以**浏览器 Web 应用**形态交付（HTTP/WS 服务 + 内嵌前端，对标 dsh web），单二进制分发；crate 库形态保留（mistake-agent 等消费方以 crate 集成）。ADR-0004（通用运行时与业务分离）不破：可执行文件内置的是**能力**（会话/模型/RPC/通用工具），不是业务。
+DeepSeek Harness（MIT）发布后，其「一切皆插件 + 能力可替换（agent loop 本身也是插件）+ 事件即扩展点 + 运行时组合」被验证为通用 agent 运行时的正确形态。对照本 crate：能力三角（Service Definition / Provider / Consumer）已有雏形但未形式化，loop 焊死在 Kernel 内不可替换，事件只做播报没有拦截语义，装配是编译期代码链。**定位决策**：so-lite-agent 从「cargo add 库」转向「业务无关的通用 Agent 可执行文件」——二进制 `sl-agent` 以**浏览器 Web 应用**形态交付（HTTP/WS 服务 + 内嵌前端，对标 dsh web），单二进制分发；**不发布 crates.io**（ADR-0009 修订：当初设想的"crate 库形态保留，mistake-agent 以 crate 集成"从未兑现，正式废除）。ADR-0004（通用运行时与业务分离）不破：可执行文件内置的是**能力**（会话/模型/RPC/通用工具），不是业务。
 
 **内核插件（Linus 模式）**：官方二进制的内核能力**只由维护者编译**，不存在任何动态内核扩展机制——无 cdylib、无签名脚本、无运行时加载面。第三方需要新内核能力 = 交 PR（经受信审查合入官方二进制）或 fork 自治。内核插件的职责是**收紧权限与能力供给**（provides 服务、特权入口、护栏/压缩等运行时能力）；用户插件的职责是**扩展 Agent 业务功能**（工具/命令/事件回调）。crate 库形态下，使用方编译自己的二进制时可自写 Rust 内核插件编入（受信集成路径，与官方二进制无关）。理由：内核层是信任边界的根，完整性靠「**没有可加载物**」保证——参考 Linux .ko（加载前验签、加载后完全信任、ring 0 无沙箱），我们选择"不加载"，因此连签名机制都不需要，比"签名即信任即全权"更强且零机制成本。
 

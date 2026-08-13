@@ -1,6 +1,8 @@
 # 插件开发上手
 
-> **从这里开始，不需要理解内核设计**：`cargo add so-lite-agent` 后按本文写插件即可。
+> **从这里开始，不需要理解内核设计**：fork 定制者在源码内按本文写插件即可
+> （Rune 脚本用户插件 / Rust 内核插件；从零开发自己的 Agent 先读
+> [agent-dev-guide.md](agent-dev-guide.md)）。
 > 完整可运行示例：[examples/plugins.rs](../examples/plugins.rs)。
 > 内核实现细节见 [kernel-dev.md](kernel-dev.md)，接口参考见 [api.md](api.md)。
 

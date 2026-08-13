@@ -2,7 +2,7 @@
 
 ## 项目速览
 
-So Lite Agent（官方简写 **SL Agent**，crate 名 `so-lite-agent`）是面向第三方开发者的开箱即用通用 Agent 运行时：agent loop、工具注册与调度、会话生命周期、模型 Provider 抽象与通用 RPC 随 crate 提供；**内核插件与用户插件由使用方自行编写**。Rust 2024 edition；仓库为 Cargo workspace（ADR-0008，P3 落地），P3 前保持单 crate。pivot 后新增业务无关的通用 Agent 可执行文件（二进制 `sl-agent`，浏览器 Web 应用形态：HTTP/WS + 内嵌前端）与 Rune 脚本用户插件路径，内核能力仅由维护者编译进官方二进制（Linus 模式，见 [docs/adr/0006](docs/adr/0006-pivot-harness-and-rune.md)）。mistake-agent 是本仓库的参考实现与消费方（切换评估后移至 pivot 的 P3+，见 [docs/adr/0001](docs/adr/0001-independent-repo-skip-m1.md)）。
+So Lite Agent（官方简写 **SL Agent**，crate 名 `so-lite-agent`）是**可执行文件项目**（ADR-0009，不发布 crates.io）：agent loop、工具注册与调度、会话生命周期、模型 Provider 抽象与通用 RPC 随源码提供；**内核插件与用户插件由使用方自行编写**（fork 定制者写 Rust 内核插件 / sl-agent 扩展者写 Rune 脚本）。Rust 2024 edition；仓库为 Cargo workspace（ADR-0008，P3 落地），P3 前保持单 crate。主交付是业务无关的通用 Agent 可执行文件（二进制 `sl-agent`，浏览器 Web 应用形态：HTTP/WS + 内嵌前端）与 Rune 脚本用户插件路径，内核能力仅由维护者编译进官方二进制（Linus 模式，见 [docs/adr/0006](docs/adr/0006-pivot-harness-and-rune.md)）。mistake-agent 是本仓库的参考实现（保持独立二进制，见 [docs/adr/0001](docs/adr/0001-independent-repo-skip-m1.md)）。基于本项目开发自己的 Agent 见 [docs/agent-dev-guide.md](docs/agent-dev-guide.md)。
 
 ## 文档启动流程（每次开始工作前执行）
 
@@ -19,6 +19,7 @@ So Lite Agent（官方简写 **SL Agent**，crate 名 `so-lite-agent`）是面�
 
 | 你要做什么 | 先去读 | 重点内容 |
 |---|---|---|
+| 基于本项目开发自己的 Agent | docs/agent-dev-guide.md | 两条主线（sl-agent 扩展者 / fork 定制者）选型与步骤 |
 | 写 / 改插件 | docs/plugin-dev.md + examples/ | 两段式契约、enabled、目录编排、句柄注入 |
 | 写 / 改内核 | docs/kernel-dev.md + src/agent/、src/registry/ | 模块地图、装配、调用链、扩展路径 |
 | 接模型 Provider | docs/api.md §5 + src/model/ | ModelService、注册表、内置适配器 |

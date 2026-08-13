@@ -5,7 +5,7 @@
 ## 命名
 
 **SL Agent（官方简写）**:
-so-lite-agent 的官方简写；另一种写法是 **So Lite Agent**。文档、标题与口头交流优先用 SL Agent；代码与包名仍是 `so-lite-agent` / `so_lite_agent`，二进制名为 `sl-agent`（pivot 后以**浏览器 Web 应用**形态交付的业务无关通用 Agent 可执行文件：HTTP/WS 服务 + 内嵌前端，ADR-0006），不因简写改动。
+so-lite-agent 的官方简写；另一种写法是 **So Lite Agent**。文档、标题与口头交流优先用 SL Agent；代码与包名仍是 `so-lite-agent` / `so_lite_agent`，二进制名为 `sl-agent`（pivot 后以**浏览器 Web 应用**形态交付的业务无关通用 Agent 可执行文件：HTTP/WS 服务 + 内嵌前端，ADR-0006），不因简写改动。**可执行文件项目**（ADR-0009）：不发布 crates.io，开发自己的 Agent = sl-agent 扩展者（Rune 脚本）/ fork 定制者（改 Rust）。
 _Avoid_: SLA、LiteAgent、SL-Agent（连字符变体）
 
 ## 运行时结构
@@ -57,7 +57,7 @@ _Avoid_: SettingsChanged（业务命名）
 ## 插件与服务
 
 **Kernel plugin（内核插件）**:
-运行在内核信任边界内的特权子系统，负责敏感资源与能力（如会话存储、模型 Provider、业务服务）；经两段式契约注册，注册上下文为全量服务句柄。职责是**收紧权限与能力供给**（provides 服务、特权入口、护栏/压缩等运行时能力）。仅以 Rust 编写，且只由维护者编译进官方二进制（**Linus 模式**，ADR-0006）：不存在动态内核扩展机制（无 dll / 无签名脚本 / 无加载面），第三方需要新内核能力 = 交 PR 或 fork；crate 库形态下使用方自写内核插件编进自己的二进制（受信集成路径）。防篡改由「没有可加载物」保证。
+运行在内核信任边界内的特权子系统，负责敏感资源与能力（如会话存储、模型 Provider、业务服务）；经两段式契约注册，注册上下文为全量服务句柄。职责是**收紧权限与能力供给**（provides 服务、特权入口、护栏/压缩等运行时能力）。仅以 Rust 编写，且只由维护者编译进官方二进制（**Linus 模式**，ADR-0006）：不存在动态内核扩展机制（无 dll / 无签名脚本 / 无加载面），第三方需要新内核能力 = 交 PR 或 fork；fork 定制者在 `src/plugin/` 写内核插件编进自己的二进制（受信集成路径，ADR-0036 构建期自动发现）。防篡改由「没有可加载物」保证。
 _Avoid_: 系统服务、内核级插件（口语）
 
 **User plugin（用户插件）**:

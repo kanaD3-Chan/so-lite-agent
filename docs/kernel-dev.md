@@ -1,8 +1,9 @@
 # Kernel 开发手册
 
-> 本文档面向**想理解或修改 so-lite-agent 内核**的开发者（crate 维护者、深度集成者）。
-> **只做 Agent 的开发者不需要读本文档**：`cargo add so-lite-agent` 后按
-> [docs/plugin-dev.md](plugin-dev.md) 写内核/用户插件即可，内核设计细节对使用方不可见。
+> 本文档面向**想理解或修改 so-lite-agent 内核**的开发者（fork 定制者、深度集成者）。
+> **只做 Agent 的开发者不需要读本文档**：按
+> [agent-dev-guide.md](agent-dev-guide.md) 选路线（sl-agent 扩展者写 Rune / fork
+> 定制者写插件）即可，内核设计细节对插件作者不可见。
 >
 > 本文档由 mistake-agent 的 `docs/kernel-dev.md` 按通用语义改编（AGPL-3.0 同源），
 > 描述的是本 crate 的通用运行时，不含任何业务（错题/记忆/验算等）语义。

@@ -1,8 +1,9 @@
 # so-lite-agent API 参考
 
-> 面向**使用方（第三方开发者）**：`cargo add so-lite-agent` 后需要知道的装配、Kernel
-> 直连 API、通用 RPC、事件流、模型 Provider 与审计。本文档只讲接口，不讲内核设计；
-> 想理解内核再读 [docs/kernel-dev.md](kernel-dev.md)。
+> 面向 **fork 定制者**（ADR-0009 不发布 crates.io）：在本仓库源码内装配 Kernel、
+> 写内核/用户插件时需要知道的直连 API、通用 RPC、事件流、模型 Provider 与审计。
+> 本文档只讲接口，不讲内核设计；想理解内核再读 [docs/kernel-dev.md](kernel-dev.md)；
+> 从零开发自己的 Agent 先读 [docs/agent-dev-guide.md](agent-dev-guide.md)。
 > 由 mistake-agent 的 `docs/api.md` 按通用语义改编（AGPL-3.0 同源），业务方法一律不在此列。
 
 ## 1. 十行跑通（不需要懂内核）
