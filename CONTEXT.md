@@ -123,8 +123,12 @@ _Avoid_: 会话 ID（暗示用户可见）
 _Avoid_: 任务名（过窄）
 
 **Session event log（会话事实日志）**:
-会话的**不可变真相**（ADR-0007）：per-session append-only 事件序列（lossless JSON、seq 连续、落盘后不修改）；事件类型 = user/assistant message、reasoning、tool/result、edit、compaction/summary；编辑/重新生成/压缩统一为「追加 + replace 遮蔽 + 投影」，可回放/恢复/审计。参考 DSH `SessionEventMap` / `SurfaceOp`。与 `EventSink`（GUI 播报）严格分离。
+会话的**不可变真相**（ADR-0007）：per-session append-only 事件序列（lossless JSON、seq 连续、落盘后不修改）；事件类型 = user/assistant message、reasoning、tool/result、edit、compaction/summary；编辑/重新生成/压缩统一为「追加 + replace 遮蔽 + 投影」，可回放/恢复/审计。参考 DSH `SessionEventMap` / `SurfaceOp`。与 `EventSink`（GUI 播报）严格分离。crate 提供 `InMemorySessionStore`（默认）与 `JsonlSessionStore`（JSONL 落盘 + 崩溃尾部修复，`sl-agent` 默认启用，ADR-0007 第二步）。
 _Avoid_: 会话日志（与诊断日志混淆）
+
+**Workspace（工作区）**:
+仓库编译组织形态（ADR-0008）：从单 crate 改为 Cargo workspace——内核插件以**独立 crate** 编写（`crates/plugin-*/`），整个 workspace 最终**编译成一个二进制**（`sl-agent`）。引擎 crate 保持业务无关（ADR-0004），插件 crate 声明自己的依赖；crate 边界即信任边界（Linus 模式：只有维护者能加插件 crate）。P3 落地，P2 保持 `src/plugin/` 目录形态。
+_Avoid_: 多二进制分发（仍是单二进制）
 
 **Message tree（消息树）**:
 会话内消息的**投影视图**（ADR-0007 转向后）：由会话事实日志经遮蔽投影派生——模型 history 是活跃投影链，人读 transcript 是全量日志；每条消息有 id 与 parentId，编辑或重新生成 = 追加新事件 + replace 遮蔽旧消息，底层日志不可变、历史永不丢。

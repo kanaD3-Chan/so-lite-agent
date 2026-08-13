@@ -78,10 +78,15 @@ requires 句柄）端到端注册并调用；AgentLoop trait 化后默认实现�
 
 ## P2：会话事实日志 + Rune 一等支持 + 事件决策分离
 
-- **会话事实日志转向（ADR-0007，第一优先）**：SessionStore → append-only 事件日志 +
-  遮蔽投影（参考 DSH `SessionEventMap` / `SurfaceOp` / 持久化契约）；编辑/重新生成/压缩
-  统一为追加 + replace 遮蔽；RPC 外层语义保持；InMemory 重写 + JSONL 落盘
-  （崩溃尾部修复，sl-agent 默认启用）；
+- **会话事实日志转向（ADR-0007，✅ 存储转向已落地）**：SessionStore → append-only
+  事件日志 + 遮蔽投影（参考 DSH `SessionEventMap` / `SurfaceOp` / 持久化契约）；
+  `InMemorySessionStore` 重写为「事件日志 + 投影缓存」，Kernel/RPC 外层语义保持
+  （`edit_message` / `switch_branch` / `read_session` 行为不变，前端帧协议零改动）；
+  **JSONL 落盘（✅ 已落地）**：`JsonlSessionStore`（每会话 `<key>.jsonl`，首行 meta +
+  事件行，崩溃尾部修复 = 截断不完整行，原子写 meta，参考 mistake-agent storage 基建），
+  `sl-agent` 默认启用（`SL_AGENT_DATA_DIR`，默认 `./data`）；
+  **内核插件目录（✅ 已落地）**：`src/plugin/` + build.rs 自动发现（ADR-0036，参考
+  mistake-agent），首个内核插件 `storage`（纯服务提供者，JSONL 会话存储）；
 - 热重载（rune 热重载）：脚本变更后撤销/重挂注册（对应 DSH 的可逆副作用语义）；
 - 事件 / 审计 / RPC 桥：脚本插件经宿主函数触发 `Event::Custom`、读审计、调通用 RPC；
 - 事件决策分离（调研报告路线 1）：保留 `EventSink` 播报，新增内核插件 typed hook
@@ -93,7 +98,10 @@ requires 句柄）端到端注册并调用；AgentLoop trait 化后默认实现�
 
 ## P3：分发形态评估（评估项）
 
-- web 打磨：会话持久化落盘、模型/凭据配置界面、错误与日志的用户面；
+- **workspace 化（ADR-0008，✅ 决策已留痕）**：仓库改为 Cargo workspace——内核插件
+  独立 crate（`crates/plugin-*/`），整个 workspace 编译成一个二进制（`sl-agent`）；
+  engine crate 保持业务无关；build.rs 自动发现改扫 workspace 级插件目录；P3 执行迁移；
+- web 打磨：会话持久化落盘（已具备）、模型/凭据配置界面、错误与日志的用户面；
 - 配置驱动组合评估：重议 ADR-0005（profile/patch 类似物）——只有明确需求才做；
 - 会话事实日志词汇扩展评估：turn/step、raw chunk、tool 生命周期、compaction 锁、
   fork（由 mistake 迁移需求反推，ADR-0007 第三步）；

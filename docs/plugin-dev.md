@@ -37,7 +37,7 @@ KernelBuilder::new().register_kernel_plugin(desc);
 - **加载时**（默认懒加载，首次命中入口点才执行）：调用 `register(ctx)` 绑定 handler；`info().load = LoadPolicy::Eager` 可改为注册时立即绑定。
 - **enabled 标记**：`Info.enabled` 缺省 **false**——插件未启用时注册表静默跳过（保留在聚合点无害）；显式 `enabled: true` 才注册。
 
-**为什么不用宏/自动发现**：注册保持**显式链式调用**（`register_plugin` / `register_kernel_plugin` 各一行），延续 mistake-agent 的显式装配设计（对应其 ADR-0036 的结论）。曾评估过两类替代：属性宏 + 一次聚合（仍需显式清单，收益有限）与 `inventory`/`linkme` 链接期自动收集（最接近 Python 装饰器，但引入隐式全局注册表、平台坑，且破坏 build 时 fail-fast 的可预期性）——均被否。以后若想减少样板，加宏是纯增量、不破坏现有 API。
+**为什么不用宏/自动发现**：**用户插件**注册保持**显式链式调用**（`register_plugin` 各一行），延续 mistake-agent 的显式装配设计。曾评估过属性宏 + 一次聚合与 `inventory`/`linkme` 链接期自动收集（引入隐式全局注册表、平台坑，破坏 build 时 fail-fast 的可预期性）——均被否。**内核插件例外**（ADR-0036）：内核插件放 `src/plugin/<name>/`，build.rs 构建期自动发现生成 `builtin_kernel_plugins()` 清单，`sl-agent` 装配时逐条注册——因为内核插件由维护者编译进官方二进制（Linus 模式），目录即插件的编排收益明确（新增插件零样板）。
 
 用户插件与内核插件对照：
 

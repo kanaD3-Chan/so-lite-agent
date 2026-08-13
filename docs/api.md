@@ -174,17 +174,36 @@ let service = register_openai_compatible(&registry, "deepseek", OpenAiCompatible
 （记忆/验算/settings 等）不在通用变体内，使用方可经自定义 sink 附加应用字段或
 `Event::Custom` 上浮。
 
-## 8. 会话与消息树
+## 8. 会话事实日志（ADR-0007）
 
-`SessionStore` 契约（异步 trait）：
+`SessionStore` 契约（异步 trait）：会话真相 = per-session **append-only 事件日志**
+（lossless JSON、seq 连续、落盘后不可修改），消息历史由遮蔽投影派生。
 
 - 元数据：`create_session` / `get_session` / `set_goal` / `archive` / `list_sessions` / `set_last_activity`；
-- 消息：`append_message` / `read_path`（活跃路径）/ `read_all`（全量）/ `set_active_path`；
-- 分支：`derive_branch`（编辑派生）/ `switch_branch` / `splice_compaction`（压缩接入）。
+- 事件日志：`append_event`（追加，seq 自动分配，校验 JSON 可序列化 + surface 合法）
+  / `read_events`（全量日志，含被遮蔽事件）/ `resolve_seq`（消息 id → 事件 seq）；
+- 投影：`read_path`（活跃链，默认末端 = `active_path` 或最新 surface 事件）/
+  `read_path_from(end_seq)`（任意末端，switch_branch）/ `set_active_path` /
+  `read_all`（全量日志 → 消息，人读 transcript）。
 
-`Message` 为消息树节点（id/parent_id + kind）；`MessageKind`：`user`（含 `display_text`
-与 `attachments`）/ `assistant` / `tool_call`（含 `call_id`，Responses 回传用）/
-`reasoning` / `system`。`InMemorySessionStore` 重启即失，文件实现由使用方提供。
+事件 = `{ seq, message, surface_op?, source_event_seqs?, created_at }`；`message.kind`
+即事件判别（User → user/message、Assistant → assistant/message、Reasoning →
+assistant/reasoning、ToolCall → tool/result、System → compaction/summary）；
+`SurfaceOp`：`Append` 或 `Replace { start, end }`（编辑/重新生成/压缩统一走 replace
+遮蔽旧事件，`source_event_seqs` 记录被遮蔽 seq 全集）。投影纯函数
+`fold_surface` / `chain_from` / `project_messages` 从 `services` 导出，供内核/测试复用。
+
+`Message` 为投影视图节点（id/parent_id + kind）；`MessageKind`：`user`（含
+`display_text` 与 `attachments`）/ `assistant` / `tool_call`（含 `call_id`，Responses
+回传用）/ `reasoning` / `system`。
+
+默认实现：
+
+- `InMemorySessionStore`：全内存事件日志，重启即失；
+- `JsonlSessionStore`（`services::JsonlSessionStore`）：JSONL 落盘，每会话
+  `<key>.jsonl`（首行 meta + 事件行），崩溃尾部修复（截断不完整行）、原子写 meta、
+  seq 连续校验（坏日志拒绝重建）；`sl-agent` 默认启用（`SL_AGENT_DATA_DIR`，
+  默认 `./data`）。
 
 ## 9. 插件契约
 
@@ -197,6 +216,7 @@ let service = register_openai_compatible(&registry, "deepseek", OpenAiCompatible
 `sl-agent` 是业务无关的通用 Agent 可执行文件（ADR-0006）：HTTP/WS + 内嵌前端，
 `cargo run --bin sl-agent --features server,rune-plugins` 启动后浏览器打开
 `http://127.0.0.1:8080`（`SL_AGENT_PORT` 改端口，`SL_AGENT_PLUGINS_DIR` 改插件目录，
+`SL_AGENT_DATA_DIR` 改会话数据目录（默认 `./data`，JSONL 落盘），
 `SL_AGENT_API_URL/API_KEY/MODEL` 接真实 OpenAI 兼容端点，缺省 mock 模型）。
 
 WS 协议复用 §4 的帧格式：浏览器发 `RpcRequest` JSON 文本帧，服务端回

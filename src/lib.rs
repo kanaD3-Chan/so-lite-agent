@@ -18,6 +18,8 @@ pub mod events;
 pub mod logger;
 pub mod message;
 pub mod model;
+/// 内核插件目录（Linus 模式，ADR-0006）：构建期自动发现（build.rs，ADR-0036）。
+pub mod plugin;
 pub mod registry;
 pub mod rpc;
 #[cfg(feature = "rune-plugins")]

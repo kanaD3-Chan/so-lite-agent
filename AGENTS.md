@@ -2,7 +2,7 @@
 
 ## 项目速览
 
-So Lite Agent（官方简写 **SL Agent**，crate 名 `so-lite-agent`）是面向第三方开发者的开箱即用通用 Agent 运行时：agent loop、工具注册与调度、会话生命周期、模型 Provider 抽象与通用 RPC 随 crate 提供；**内核插件与用户插件由使用方自行编写**。Rust 2024 edition，单 crate。pivot 后新增业务无关的通用 Agent 可执行文件（二进制 `sl-agent`，浏览器 Web 应用形态：HTTP/WS + 内嵌前端）与 Rune 脚本用户插件路径，内核能力仅由维护者编译进官方二进制（Linus 模式，见 [docs/adr/0006](docs/adr/0006-pivot-harness-and-rune.md)）。mistake-agent 是本仓库的参考实现与消费方（切换评估后移至 pivot 的 P3+，见 [docs/adr/0001](docs/adr/0001-independent-repo-skip-m1.md)）。
+So Lite Agent（官方简写 **SL Agent**，crate 名 `so-lite-agent`）是面向第三方开发者的开箱即用通用 Agent 运行时：agent loop、工具注册与调度、会话生命周期、模型 Provider 抽象与通用 RPC 随 crate 提供；**内核插件与用户插件由使用方自行编写**。Rust 2024 edition；仓库为 Cargo workspace（ADR-0008，P3 落地），P3 前保持单 crate。pivot 后新增业务无关的通用 Agent 可执行文件（二进制 `sl-agent`，浏览器 Web 应用形态：HTTP/WS + 内嵌前端）与 Rune 脚本用户插件路径，内核能力仅由维护者编译进官方二进制（Linus 模式，见 [docs/adr/0006](docs/adr/0006-pivot-harness-and-rune.md)）。mistake-agent 是本仓库的参考实现与消费方（切换评估后移至 pivot 的 P3+，见 [docs/adr/0001](docs/adr/0001-independent-repo-skip-m1.md)）。
 
 ## 文档启动流程（每次开始工作前执行）
 
@@ -41,7 +41,7 @@ cargo test --test live_api -- --ignored   # 真实 API（key 只从本地配置�
 
 ## 架构红线（改代码时逐条遵守）
 
-- 单 crate；**通用运行时与业务分离**：错题、记忆、验算、settings 等业务领域类型与语义不进 crate（ADR-0004）。
+- **通用运行时与业务分离**：错题、记忆、验算、settings 等业务领域类型与语义不进引擎 crate（ADR-0004）。仓库为 **Cargo workspace**（ADR-0008）：内核插件以独立 crate 编写（`crates/plugin-*/`），整个 workspace 最终编译成**一个二进制**（`sl-agent`）；P3 前保持单 crate + `src/plugin/` 目录形态。
 - 能力边界：用户插件只经 `requires` 声明的服务句柄；内核插件经 `KernelContext` 拿全量句柄；不引入全局可变状态绕过句柄（`ProviderRegistry` 实例由使用方持有）。
 - CallerPolicy：`UserAndModel` 工具模型可调、用户必可调；`UserOnly` 不进模型工具列表，调度层再拒一次（双墙）。
 - 入口点命名 `namespace::tool`：插件只写短名，kernel 拼全名；wire name（`::` → `__`）全局唯一，撞名由注册表拒绝。

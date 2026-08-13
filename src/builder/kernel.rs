@@ -15,7 +15,7 @@ use crate::message::{Attachment, Message, MessageId, MessageKind};
 use crate::model::{AbortSignal, ToolSchema};
 use crate::registry::Registry;
 use crate::rpc::{Method, RpcAttachment, RpcError, RpcExtension, RpcFrame, RpcRequest};
-use crate::services::SessionStore;
+use crate::services::{SessionEvent, SessionStore, SurfaceOp, fold_surface};
 
 fn session_err(e: crate::services::SessionError) -> LoopError {
     LoopError::Internal(e.to_string())
@@ -88,8 +88,8 @@ impl Kernel {
         &self.bus
     }
 
-    /// 发送一条用户消息：会话不存在自动创建；user 消息先落盘，跑完 loop
-    /// 把新增消息追加回 SessionStore，并更新 last_activity_at。
+    /// 发送一条用户消息：会话不存在自动创建；user 消息先落盘（追加事件），跑完
+    /// loop 把新增消息追加为事件，并更新 last_activity_at。
     pub async fn send_user_message(
         &self,
         key: SessionKey,
@@ -119,7 +119,6 @@ impl Kernel {
                 .map_err(session_err)?;
         }
 
-        let mut messages = self.store.read_path(&key).await.map_err(session_err)?;
         let mut user_msg = Message::user(text);
         if let MessageKind::User {
             attachments: atts, ..
@@ -127,12 +126,13 @@ impl Kernel {
         {
             *atts = attachments;
         }
-        crate::message::append_to_path(&mut messages, user_msg.clone());
         self.store
-            .append_message(&key, &user_msg)
+            .append_event(&key, SessionEvent::new(user_msg, SurfaceOp::Append))
             .await
             .map_err(session_err)?;
 
+        // 模型可见消息 = 活跃链投影（含刚追加的 user 消息）。
+        let messages = self.store.read_path(&key).await.map_err(session_err)?;
         let tools = self.registry.model_tools();
         let signal = AbortSignal::new();
         *self.active.lock().expect("active poisoned") = Some(signal.clone());
@@ -149,22 +149,50 @@ impl Kernel {
         *self.active.lock().expect("active poisoned") = None;
         let outcome = outcome?;
 
+        // 追加本回合新增消息（assistant / reasoning / tool 均为 append）。
         for msg in &outcome.messages {
+            let op = match &msg.kind {
+                MessageKind::System { .. } => {
+                    // 摘要消息由压缩分支统一处理（replace 遮蔽被压段）。
+                    continue;
+                }
+                _ => SurfaceOp::Append,
+            };
             self.store
-                .append_message(&key, msg)
+                .append_event(&key, SessionEvent::new(msg.clone(), op))
                 .await
                 .map_err(session_err)?;
         }
         if let Some(info) = &outcome.compaction {
-            // 摘要消息已计入 outcome.messages（上面已落盘）；这里只改活跃路径链。
-            self.store
-                .splice_compaction(&key, &info.summary, info.tail_start)
-                .await
-                .map_err(session_err)?;
-            self.store
-                .set_active_path(&key, Some(info.tail_end))
-                .await
-                .map_err(session_err)?;
+            // 压缩 = 追加 summary 事件，replace 遮蔽被压段（ADR-0007）。
+            let events = self.store.read_events(&key).await.map_err(session_err)?;
+            let fold = fold_surface(&events).map_err(session_err)?;
+            let id_to_seq: std::collections::HashMap<MessageId, u64> =
+                events.iter().map(|e| (e.message.id, e.seq)).collect();
+            let tail_seq = id_to_seq
+                .get(&info.tail_start)
+                .copied()
+                .ok_or_else(|| LoopError::Internal("压缩保留段首条不在事件日志".into()))?;
+            let tail_idx = fold
+                .chain
+                .iter()
+                .position(|s| *s == tail_seq)
+                .ok_or_else(|| LoopError::Internal("压缩保留段首条不在活跃链".into()))?;
+            let compacted = &fold.chain[..tail_idx];
+            if let (Some(&start), Some(&end)) = (compacted.first(), compacted.last()) {
+                let mut summary_event =
+                    SessionEvent::new(info.summary.clone(), SurfaceOp::Replace { start, end });
+                summary_event.source_event_seqs = compacted.to_vec();
+                self.store
+                    .append_event(&key, summary_event)
+                    .await
+                    .map_err(session_err)?;
+                // 活跃末端 = 保留段末端（压缩后链 = [摘要, 保留段…]）。
+                self.store
+                    .set_active_path(&key, Some(info.tail_end))
+                    .await
+                    .map_err(session_err)?;
+            }
             self.events
                 .emit(crate::events::Event::Compaction { session: key });
             self.auditor.record(AuditRecord::Compaction {
@@ -195,36 +223,77 @@ impl Kernel {
         })
     }
 
-    /// 编辑消息：在 message_id 处派生新分支（文本替换，历史不截断）。
+    /// 编辑消息：追加新 assistant 事件，replace 遮蔽从被编辑消息到链尾的全部节点
+    /// （编辑 = 派生新分支，编辑点之后的历史留在日志但不属于活跃路径，ADR-0007）。
     pub async fn edit_message(
         &self,
         key: SessionKey,
         message_id: MessageId,
         text: &str,
     ) -> Result<Vec<Message>, LoopError> {
-        let new_path = self
+        let seq = self
             .store
-            .derive_branch(&key, message_id, text)
+            .resolve_seq(&key, message_id)
             .await
             .map_err(session_err)?;
-        if let Some(branch_id) = new_path.last().map(|m| m.id) {
-            self.auditor.record(AuditRecord::MessageEdited {
-                message_id,
-                branch_id,
-            });
+        let events = self.store.read_events(&key).await.map_err(session_err)?;
+        let fold = fold_surface(&events).map_err(session_err)?;
+        let original = events
+            .iter()
+            .find(|e| e.seq == seq)
+            .ok_or_else(|| LoopError::Internal("编辑目标事件不存在".into()))?;
+        if !matches!(original.message.kind, MessageKind::Assistant { .. }) {
+            return Err(LoopError::Internal("只能编辑 assistant 消息".into()));
         }
-        Ok(new_path)
+        // 被遮蔽区间 = [被编辑消息 ..= 链尾]（编辑点之后全部丢出新活跃路径）。
+        let start_idx = fold
+            .chain
+            .iter()
+            .position(|s| *s == seq)
+            .ok_or_else(|| LoopError::Internal("编辑目标不在活跃链".into()))?;
+        let shadowed = fold.chain[start_idx..].to_vec();
+        let end = *shadowed
+            .last()
+            .ok_or_else(|| LoopError::Internal("活跃链为空".into()))?;
+        let mut edit_event = SessionEvent::new(
+            Message::assistant(text),
+            SurfaceOp::Replace { start: seq, end },
+        );
+        edit_event.source_event_seqs = shadowed;
+        let stored = self
+            .store
+            .append_event(&key, edit_event)
+            .await
+            .map_err(session_err)?;
+        self.store
+            .set_active_path(&key, Some(stored.message.id))
+            .await
+            .map_err(session_err)?;
+        self.auditor.record(AuditRecord::MessageEdited {
+            message_id,
+            branch_id: stored.message.id,
+        });
+        self.store.read_path(&key).await.map_err(session_err)
     }
 
-    /// 切换活跃路径（消息树分支）。
+    /// 切换活跃路径（遮蔽链分支）。
     pub async fn switch_branch(
         &self,
         key: SessionKey,
         message_id: MessageId,
     ) -> Result<Vec<Message>, LoopError> {
+        let seq = self
+            .store
+            .resolve_seq(&key, message_id)
+            .await
+            .map_err(session_err)?;
+        self.store
+            .set_active_path(&key, Some(message_id))
+            .await
+            .map_err(session_err)?;
         let chain = self
             .store
-            .switch_branch(&key, message_id)
+            .read_path_from(&key, seq)
             .await
             .map_err(session_err)?;
         self.auditor

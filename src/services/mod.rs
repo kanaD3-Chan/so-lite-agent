@@ -5,8 +5,13 @@
 
 mod dynamic;
 mod handles;
+mod jsonl;
 mod session;
 
 pub use dynamic::DynamicService;
 pub use handles::{ServiceHandles, ServiceId};
-pub use session::{InMemorySessionStore, SessionError, SessionHandle, SessionStore, active_chain};
+pub use jsonl::JsonlSessionStore;
+pub use session::{
+    InMemorySessionStore, SessionError, SessionEvent, SessionHandle, SessionStore, SurfaceFold,
+    SurfaceOp, chain_from, fold_surface, project_messages,
+};

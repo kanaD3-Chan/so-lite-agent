@@ -1,14 +1,15 @@
-//! 内核插件参考模板：复制即开工。
-//! 实现 `KernelPlugin` → `KernelDescriptor::from_plugin::<MyKernelPlugin>()` → `register_kernel_plugin`。
+// 内核插件参考模板：复制即开工（Linus 模式，ADR-0006——内核插件只在官方二进制内，
+// 由维护者编译，复制到 `src/plugin/<你的插件名>/` 使用；build.rs 自动收录，ADR-0036）。
+// 实现 `KernelPlugin` → `KernelDescriptor::from_plugin::<MyKernelPlugin>()` → 注册表收录。
 
 use std::sync::Arc;
 
 use serde_json::{Value, json};
-use so_lite_agent::agent::dispatch::ToolCallContext;
-use so_lite_agent::context::KernelContext;
-use so_lite_agent::contract::{CallerPolicy, Info, PluginError, ToolError};
-use so_lite_agent::registry::{KernelDescriptor, KernelPlugin, tool_def};
-use so_lite_agent::services::ServiceId;
+use crate::agent::dispatch::ToolCallContext;
+use crate::context::KernelContext;
+use crate::contract::{CallerPolicy, Info, PluginError, ToolError};
+use crate::registry::{KernelDescriptor, KernelPlugin, tool_def};
+use crate::services::ServiceId;
 
 pub struct MyKernelPlugin;
 

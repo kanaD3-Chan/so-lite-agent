@@ -61,11 +61,25 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
         .and_then(|v| v.parse().ok())
         .unwrap_or(8080);
     let plugins_dir = std::env::var("SL_AGENT_PLUGINS_DIR").unwrap_or_else(|_| "./plugins".into());
+    let data_dir = std::env::var("SL_AGENT_DATA_DIR").unwrap_or_else(|_| "./data".into());
+
+    // ---- 会话持久化：JSONL 事件日志落盘（ADR-0007 第二步，sl-agent 默认启用）----
+    let session_store = Arc::new(so_lite_agent::services::JsonlSessionStore::open(
+        std::path::Path::new(&data_dir),
+    )?);
 
     // ---- 装配 kernel（模型：env 有则真实，否则默认 mock）----
     let (hub_tx, hub_rx) = tokio::sync::broadcast::channel(256);
     let events = Arc::new(WsHub { tx: hub_tx.clone() });
     let mut builder = KernelBuilder::new().event_sink(events);
+    // 会话存储注入（JSONL 落盘；类型擦除为 SessionStore 句柄）。
+    let session_handle: std::sync::Arc<dyn so_lite_agent::services::SessionStore> = session_store;
+    builder =
+        builder.service_handles(ServiceHandles::default().with_session(session_handle.clone()));
+    // 内核插件注册（Linus 模式，ADR-0036 构建期自动发现清单）。
+    for desc in so_lite_agent::plugin::builtin_kernel_plugins() {
+        builder = builder.register_kernel_plugin(desc);
+    }
 
     if let (Ok(api_url), Ok(api_key), Ok(model)) = (
         std::env::var("SL_AGENT_API_URL"),
@@ -86,11 +100,10 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
             },
         )?;
         let auditor = Auditor::new(Arc::new(MemoryAuditSink::default()));
-        builder = builder.service_handles(ServiceHandles::default().with_model(ModelHandle::new(
-            service,
-            Duration::from_secs(30),
-            auditor,
-        )));
+        // 保留已注入的 session 存储，只补 model。
+        let mut handles = ServiceHandles::default().with_session(session_handle.clone());
+        handles = handles.with_model(ModelHandle::new(service, Duration::from_secs(30), auditor));
+        builder = builder.service_handles(handles);
     }
 
     // ---- Rune 脚本用户插件目录（一插件一目录，失败只告警单个插件）----

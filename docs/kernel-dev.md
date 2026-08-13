@@ -160,6 +160,18 @@ KernelBuilder::new().register_plugin(desc);
 - `PluginContext.handles`：只含 `requires` 声明过的服务（结构性受限，无运行时检查可绕）；
 - `KernelContext.handles`：全量句柄（内核插件在信任边界内，是服务的提供者）。
 
+### 4.4 内核插件目录（Linus 模式，ADR-0036）
+
+内核插件放在 `src/plugin/<name>/`（目录即插件，小写蛇形，`mod.rs` 为入口），
+**build.rs 自动发现**：构建期扫描目录生成 `builtin_kernel_plugins()` 清单，
+`sl-agent` 二进制装配时逐条注册（新增插件无需改任何聚合文件；目录根放空文件
+`disabled` 可整目录跳过）。首个内置插件 `storage`（纯服务提供者：JSONL 会话
+事实日志落盘，ADR-0007 第二步）。参考模板：`docs/plugin-dev/reference/kernel_plugin.rs`
+（复制到 `src/plugin/<你的插件名>/` 即开工）。
+
+> 规划：ADR-0008（P3）将内核插件从目录升级为**独立 crate**（`crates/plugin-*/`），
+> 整个 workspace 编译成一个二进制；P3 前保持目录形态。
+
 ## 6. 服务句柄
 
 `ServiceId` 是字符串背书的 newtype：内置 `session()` / `model()`，业务服务用
@@ -224,20 +236,26 @@ LLM 唯一决策循环；`DefaultAgentLoop` 是内置默认实现（`KernelBuild
 `session::switch` 是 loop 特殊处理的入口：不走普通 handler，而是调用注入的
 `SessionSwitch` 钩子，切换后的新会话键回填到 `TurnOutcome.session_key`。
 
-## 9. 会话与消息树
+## 9. 会话事实日志（ADR-0007）
 
-`SessionStore` 是通用持久化契约（`InMemorySessionStore` 为默认实现，文件实现由使用方提供）：
+`SessionStore` 是通用持久化契约：会话真相 = **append-only 事件日志**（lossless JSON、
+seq 连续、落盘后不可修改），消息历史由**遮蔽投影**派生（参考 DSH `SessionEventMap` /
+`SurfaceOp`）。默认实现 `InMemorySessionStore`（内存事件日志）与
+`JsonlSessionStore`（JSONL 落盘 + 崩溃尾部修复，`sl-agent` 默认启用）：
 
-- `create_session` / `get_session` / `set_goal` / `archive` / `list_sessions` / `set_last_activity`；
-- `append_message` / `read_path` / `read_all` / `set_active_path`；
-- `derive_branch`（编辑派生新分支，历史不截断）/ `switch_branch`（切活跃路径）；
-- `splice_compaction`（摘要接入消息树：保留段首条挂到摘要下）。
+- 元数据：`create_session` / `get_session` / `set_goal` / `archive` / `list_sessions` / `set_last_activity`；
+- 事件日志：`append_event`（追加，seq 自动分配，校验 JSON 可序列化 + surface 合法）/
+  `read_events`（全量日志）/ `resolve_seq`（消息 id → 事件 seq）；
+- 投影：`read_path`（活跃链）/ `read_path_from(end_seq)`（任意末端，分支）/
+  `set_active_path` / `read_all`（全量日志 → 消息，人读 transcript）；
+- 编辑/重新生成/压缩统一为「追加事件 + `SurfaceOp::Replace` 遮蔽旧事件 +
+  `source_event_seqs` 记录被遮蔽 seq」；投影纯函数 `fold_surface` / `chain_from`
+  / `project_messages` 从 `services` 导出。
 
-活跃路径从末端沿 parent 链回溯（`active_chain`）；LLM 上下文只包含活跃路径。
-
-会话切换的**决策**（新消息先判断、回合末 continue/update_goal/start_new）不是通用语义，
-由使用方实现：crate 只提供 `SessionSwitch` 钩子（`KernelBuilder::session_switch` 注入）
-与 `Summarizer`（`KernelBuilder::summarizer` 注入）；`session::switch` 工具也由使用方注册
+活跃链从末端沿遮蔽链回溯；LLM 上下文只包含活跃链投影。会话切换的**决策**（新消息
+先判断、回合末 continue/update_goal/start_new）不是通用语义，由使用方实现：crate 只
+提供 `SessionSwitch` 钩子（`KernelBuilder::session_switch` 注入）与 `Summarizer`
+（`KernelBuilder::summarizer` 注入）；`session::switch` 工具也由使用方注册
 （参照 [docs/plugin-dev.md](plugin-dev.md)）。
 
 ## 10. RPC 与事件
@@ -295,7 +313,8 @@ cargo test --test live_api -- --ignored   # 真实 API（key 只从本地配置�
 
 ## 13. 设计红线
 
-- 单 crate；通用运行时不实现业务，业务领域类型不进 crate；
+- 引擎 crate 保持业务无关（ADR-0004）；仓库为 Cargo workspace（ADR-0008，P3 落地），
+  P3 前保持单 crate + `src/plugin/` 内核插件目录（build.rs 自动发现，ADR-0036）；
 - 用户插件不直触资源（只能经 `requires` 句柄）；内核插件特权入口经 `KernelContext`；
 - `UserOnly` 工具不进入模型工具列表，所有入口点经 Registry/Dispatch；
 - 审计默认全覆盖，敏感值脱敏；

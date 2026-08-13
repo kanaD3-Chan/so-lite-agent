@@ -108,9 +108,10 @@ Rune 脚本用户插件放 `./plugins/`（一插件一目录：`manifest.json` �
 | `agent/session` | SessionKey/Goal/SessionMeta、中断总线、摘要器、会话切换钩子 |
 | `contract` | 入口点元数据、CallerPolicy、ToolError、PluginError |
 | `registry`（plugin/core）/ `context` | 两段式插件契约（info + register）、懒注册、模型工具列表过滤 |
-| `services`（handles/session） | ServiceId、SessionStore 契约 + InMemory 实现、ServiceHandles |
+| `services`（session/jsonl/handles/dynamic） | SessionStore 事件日志契约、InMemory/JsonlSessionStore、ServiceHandles |
 | `model`（contract/handle/providers/mock） | ModelService 抽象、ModelChunk 归一化、ProviderRegistry、Mock |
-| `events` / `audit` / `message` | 事件流、审计记录、消息树 |
+| `events` / `audit` / `message` | 事件流、审计记录、消息（投影视图） |
+| `plugin` | 内核插件目录（Linus 模式）：build.rs 自动发现（ADR-0036），首个插件 `storage`（JSONL 会话落盘） |
 | `builder`（assembly/kernel） | KernelBuilder 装配入口 + Kernel 直连 API |
 
 ## 里程碑状态
@@ -121,8 +122,8 @@ Rune 脚本用户插件放 `./plugins/`（一插件一目录：`manifest.json` �
 | M3 | Provider 层：内置适配器 + register_provider | ✅（真实 API 验收通过） |
 | M4 | 通用 RPC + KernelBuilder 定型；插件手册/参考模板迁移 | ✅ |
 | P1 | pivot 骨架：能力 seam 化（loop 可替换）+ Rune 用户插件桥 + `sl-agent` 服务入口（HTTP/WS + 浏览器最小聊天页） | ✅（2026-08-13 验收：浏览器 hello 回合 + Rune 插件端到端） |
-| P2 | Rune 插件一等支持（热重载、事件/审计/RPC 桥）+ GUI 长全（目录约定已提前到 P1） | ⏳ 待办 |
-| P3 | 分发形态：web 打磨 / 配置组合 / mistake 迁移与切换评估（原 M5 内容后移） | ⏳ 评估 |
+| P2 | 会话事实日志（事件日志 + 遮蔽投影 + JSONL 落盘）已落地；其余（热重载 / 事件决策分离 / GUI 长全）待办 | 🔶 进行中（存储转向 ✅） |
+| P3 | 分发形态：workspace 化（ADR-0008）/ web 打磨 / 配置组合 / mistake 迁移与切换评估 | ⏳ 评估 |
 
 > M5（发布与切换）已被 pivot 取代，详见 [docs/plan.md](docs/plan.md)。
 
