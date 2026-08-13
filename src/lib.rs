@@ -20,4 +20,6 @@ pub mod message;
 pub mod model;
 pub mod registry;
 pub mod rpc;
+#[cfg(feature = "rune-plugins")]
+pub mod rune;
 pub mod services;
