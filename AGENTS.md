@@ -30,10 +30,12 @@ So Lite Agent（官方简写 **SL Agent**，crate 名 `so-lite-agent`）是面�
 
 ```bash
 cargo check
-cargo test --all-targets
-cargo clippy --all-targets -- -D warnings
+cargo test --all-targets --all-features
+cargo clippy --all-targets --all-features -- -D warnings
 cargo fmt --check
 cargo run --example hello
+cargo run --example script_plugin --features rune-plugins
+cargo run --bin sl-agent --features server,rune-plugins
 cargo test --test live_api -- --ignored   # 真实 API（key 只从本地配置读取，输出不得打印密钥）
 ```
 
@@ -52,7 +54,7 @@ cargo test --test live_api -- --ignored   # 真实 API（key 只从本地配置�
 ## 开发约定
 
 - 提交信息用简洁中文描述（如 `feat(builder): 注入摘要器与会话切换钩子`）。
-- 改动必须通过 `cargo test --all-targets` 与 `cargo clippy --all-targets -- -D warnings`。
+- 改动必须通过 `cargo test --all-targets --all-features` 与 `cargo clippy --all-targets --all-features -- -D warnings`（`--all-features` 覆盖 rune-plugins / server 门控代码）。
 - 改设计不留痕 = 没改：必须同步 CONTEXT.md 或新增 docs/adr/。
 - **代码改动必须同步文档**：代码修改在测试通过后，凡受影响的文档必须同步修改；文档同步完成前任务不得视为完成。
 - **职责先行的模块组织**：新功能先按职责规划模块边界；`mod.rs` 只负责公共面、装配与 `pub use` 重导出，职责实现放子模块；~400 行只是审查预警线，不是拆分触发条件。拆分保持外部引用稳定、零行为变化，并通过全量测试复验。

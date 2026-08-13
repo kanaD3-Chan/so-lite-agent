@@ -86,6 +86,80 @@ impl UserPlugin for StudyPlugin {
 
 注意：插件只写**短名**（`remind`），kernel 拼全名（`study::remind`），模型看到的是 wire name（`study__remind`）。
 
+## Rune 脚本路径（用户插件，ADR-0006）
+
+业务插件还可以写成 **Rune 脚本**（eBPF 模型：安全 VM + 宿主函数白名单），随可执行文件
+分发、运行时加载，**无需 cargo 构建**。与 Rust 路径共享同一两段式契约与全部校验
+（namespace/wire 唯一、`enabled` 缺省 false、requires 可用性、绑定后校验）。
+
+### 目录形态（P1 约定，检查点结论 c2）
+
+一插件一目录，目录名 = namespace：
+
+```text
+plugins/
+└── demo/                  ← namespace 必须是 "demo"
+    ├── manifest.json      ← info 结构化声明（纯数据，不执行）
+    └── plugin.rn          ← register() + handlers
+```
+
+`manifest.json` 就是 `Info` 的 JSON 形态（`enabled` 缺省 false，显式 `true` 才注册）：
+
+```json
+{
+  "namespace": "demo",
+  "enabled": true,
+  "requires": ["session"],
+  "tools": [
+    { "name": "ping", "description": "回显参数并上报会话数",
+      "params": { "type": "object" }, "policy": "user_and_model" }
+  ]
+}
+```
+
+### 脚本：register() 绑定 + handler
+
+```rune
+// plugin.rn
+pub fn register() {
+    tool("ping", handle_ping)   // 绑定：短名 + 脚本函数（必须与 manifest 声明一致）
+}
+
+async fn handle_ping(params) {
+    let sessions = session_list().await;        // requires session → 宿主函数可用
+    emit_event("demo.ping", #{ count: sessions.len() });
+    #{ "pong": params, "session_count": sessions.len() }
+}
+```
+
+- `register()` 是同步绑定（调用 `tool`/`command`/`event` 宿主函数）；
+- handler 可以是 `async fn`（await 异步宿主函数）；
+- 声明过的入口点**必须全部绑定**，漏绑在加载时 fail-fast。
+
+### 宿主函数白名单（requires → 装哪些函数）
+
+结构性裁剪：**未安装的函数 = 编译失败**（脚本结构性拿不到未声明能力，防越权）：
+
+| requires | 宿主函数 | 说明 |
+|---|---|---|
+| （恒有） | `tool`/`command`/`event` | register 期绑定 |
+| （恒有） | `emit_event(name, payload)` / `progress(msg)` / `log(level, msg)` | 播报与日志（level: debug/info/warn/error/critical） |
+| `session` | `session_list()` / `session_read(key)` | 会话读写（异步，需 await） |
+| `custom(id)` | `call_<id>(method, params)` | 服务必须实现 `DynamicService`（见下），否则注册 fail-fast |
+| `model` | — | P1 不支持，注册 fail-fast |
+
+`DynamicService` 是自定义服务的**动态调用接口**（脚本没有具体类型，无法 downcast）：
+
+```rust
+#[async_trait]
+impl DynamicService for MyNotesService {
+    async fn call(&self, method: &str, params: Value) -> Result<Value, ToolError> { /* ... */ }
+}
+// 注入：ServiceHandles::default().with_dynamic(ServiceId::custom("notes"), Arc::new(svc))
+```
+
+示例见 [examples/script_plugin.rs](../examples/script_plugin.rs)（加载仓库内 `plugins/demo/`）。
+
 ## 目录编排（推荐约定）
 
 契约与代码放哪无关，但推荐**一插件一目录**（沿用 mistake-agent 的组织风格，不含它的编译期发现语义）：

@@ -50,6 +50,42 @@ let service = register_openai_compatible(&registry, "deepseek", OpenAiCompatible
 
 Anthropic 兼容端点用 `AnthropicModelService`；自定义端点就是改 `api_url`。
 
+## 快速开始：`sl-agent` 可执行文件（浏览器 Web 应用，ADR-0006）
+
+```bash
+cargo run --bin sl-agent --features server,rune-plugins   # 打开 http://127.0.0.1:8080
+```
+
+零配置即跑通 hello 回合（默认 `MockModelService`）；接真实模型：
+
+```bash
+SL_AGENT_API_URL=https://api.deepseek.com SL_AGENT_API_KEY=xxx SL_AGENT_MODEL=deepseek-chat \
+  SL_AGENT_PORT=8080 cargo run --bin sl-agent --features server,rune-plugins
+```
+
+Rune 脚本用户插件放 `./plugins/`（一插件一目录：`manifest.json` 声明 + `plugin.rn`
+脚本，目录名即 namespace，见 [docs/plugin-dev.md](docs/plugin-dev.md)）；本仓库自带
+`plugins/demo/` 示例。内核能力仅由维护者编译进官方二进制（Linus 模式），
+第三方扩展业务 = 写 Rune 脚本，无需 cargo 构建。
+
+## 快速开始：`sl-agent` 可执行文件（浏览器 Web 应用，ADR-0006）
+
+```bash
+cargo run --bin sl-agent --features server,rune-plugins   # 打开 http://127.0.0.1:8080
+```
+
+零配置即跑通 hello 回合（默认 `MockModelService`）；接真实模型：
+
+```bash
+SL_AGENT_API_URL=https://api.deepseek.com SL_AGENT_API_KEY=xxx SL_AGENT_MODEL=deepseek-chat \
+  SL_AGENT_PORT=8080 cargo run --bin sl-agent --features server,rune-plugins
+```
+
+Rune 脚本用户插件放 `./plugins/`（一插件一目录：`manifest.json` 声明 + `plugin.rn`
+脚本，目录名即 namespace，见 [docs/plugin-dev.md](docs/plugin-dev.md)）；本仓库自带
+`plugins/demo/` 示例。内核能力仅由维护者编译进官方二进制（Linus 模式），
+第三方扩展业务 = 写 Rune 脚本，无需 cargo 构建。
+
 ## 开发上手
 
 - 只做 Agent：`cargo add so-lite-agent` → 按 [docs/plugin-dev.md](docs/plugin-dev.md) 写插件（不需要懂内核）；
@@ -84,8 +120,8 @@ Anthropic 兼容端点用 `AnthropicModelService`；自定义端点就是改 `ap
 | M2 | 新仓库骨架：通用模块 + 默认服务，hello 回合（mock） | ✅（评审通过：消费者实测 + 门禁全绿） |
 | M3 | Provider 层：内置适配器 + register_provider | ✅（真实 API 验收通过） |
 | M4 | 通用 RPC + KernelBuilder 定型；插件手册/参考模板迁移 | ✅ |
-| P1 | pivot 骨架：能力 seam 化（loop 可替换）+ Rune 用户插件桥 + `sl-agent` 服务入口（HTTP/WS + 浏览器最小聊天页） | ⏳ 待办（ADR-0006） |
-| P2 | Rune 插件一等支持（目录约定、热重载、事件/审计/RPC 桥）+ GUI 长全 | ⏳ 待办 |
+| P1 | pivot 骨架：能力 seam 化（loop 可替换）+ Rune 用户插件桥 + `sl-agent` 服务入口（HTTP/WS + 浏览器最小聊天页） | ✅（2026-08-13 验收：浏览器 hello 回合 + Rune 插件端到端） |
+| P2 | Rune 插件一等支持（热重载、事件/审计/RPC 桥）+ GUI 长全（目录约定已提前到 P1） | ⏳ 待办 |
 | P3 | 分发形态：web 打磨 / 配置组合 / mistake 迁移与切换评估（原 M5 内容后移） | ⏳ 评估 |
 
 > M5（发布与切换）已被 pivot 取代，详见 [docs/plan.md](docs/plan.md)。
@@ -96,10 +132,12 @@ Anthropic 兼容端点用 `AnthropicModelService`；自定义端点就是改 `ap
 
 ```bash
 cargo check
-cargo test
-cargo clippy -- -D warnings
+cargo test --all-targets --all-features   # 含 rune-plugins 与 server 门控代码
+cargo clippy --all-targets --all-features -- -D warnings
 cargo fmt --check
 cargo run --example hello
+cargo run --example script_plugin --features rune-plugins   # Rune 脚本插件示例
+cargo run --bin sl-agent --features server,rune-plugins     # 浏览器 Web 应用
 ```
 
 ## 术语

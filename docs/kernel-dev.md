@@ -89,6 +89,16 @@ src/
     ├── responses.rs          Responses API 流式适配器
     ├── completions.rs        Chat Completions 流式适配器
     └── anthropic.rs          Anthropic Messages API 流式适配器
+
+feature 门控（默认关，二进制启用）：
+├── rune/                    Rune 脚本用户插件（ADR-0006，feature `rune-plugins`）
+│   ├── vm.rs                ScriptVm（一次编译、按调用新建 Vm、async 调用桥）
+│   ├── host.rs              宿主函数安装骨架（动态闭包，Send 约束）
+│   └── plugin.rs            插件桥：manifest 声明 + register 绑定 + requires 白名单
+│                            （每插件一条专用执行线程：rune Value !Send × dispatch Send）
+├── src/bin/sl-agent/        服务端（feature `server`）：main.rs（HTTP/静态/装配）
+│                             + ws.rs（WS/RPC 桥 + 事件广播，单一有序路径）
+└── web/                     内嵌前端（rust-embed，P1 纯 HTML/JS）
 ```
 
 `mod.rs` 只负责公共面、装配和 `pub use` 重导出；职责实现放子模块（如
@@ -130,7 +140,11 @@ KernelBuilder::new().register_plugin(desc);
 - `Info.enabled` **缺省 false**：插件必须显式 `enabled: true` 才注册；未启用插件保留在
   聚合点/代码中，注册表静默跳过（ADR-0005）。
 - `LoadPolicy::Lazy`（默认）首次命中入口点才执行 `register`；`Eager` 注册时立即绑定。
-- `EntryRegistrar` 只允许登记 `info()` 声明过的短名（声明与实现一致）。
+- `EntryRegistrar` 只允许登记 `info()` 声明过的短名（声明与实现一致）；
+- Rune 脚本路径同一契约（`manifest.json` 声明 + 脚本 register 绑定 + 绑定后校验），
+  见 [docs/plugin-dev.md](plugin-dev.md)「Rune 脚本路径」。
+  桥的核心约束：rune 0.14 的 `Value`/`Function` 不实现 `Send`，而 dispatch 要求
+  handler future `Send`——脚本执行放在每插件专用线程，线程间只传 JSON + 通道。
 
 ### 4.2 注册表校验（fail-fast）
 
@@ -271,8 +285,8 @@ LLM 唯一决策循环；`DefaultAgentLoop` 是内置默认实现（`KernelBuild
 ```bash
 cargo fmt --check
 cargo check
-cargo test --all-targets
-cargo clippy --all-targets -- -D warnings
+cargo test --all-targets --all-features   # 含 rune-plugins / server 门控代码
+cargo clippy --all-targets --all-features -- -D warnings
 cargo test --test live_api -- --ignored   # 真实 API（key 只从本地配置读取，输出不得打印密钥）
 ```
 

@@ -65,8 +65,16 @@ _Avoid_: 系统服务、内核级插件（口语）
 _Avoid_: 业务插件（过早限定业务范围）
 
 **Rune user plugin（Rune 脚本插件）**:
-用户插件的脚本编写路径（eBPF 模型：安全 VM + 宿主函数白名单）：同一两段式契约（info 结构化声明 + register 经宿主函数绑定 handler），以 Rune 脚本随可执行文件分发、运行时加载；**requires 决定宿主装哪些函数**——脚本结构性拿不到未声明能力（防越权），明文可改也不怕（篡改只能在白名单内作恶，防篡改不是用户层目标）；enabled 缺省 false、wire 名全局唯一等校验与 Rust 路径一致（ADR-0006）。
+用户插件的脚本编写路径（eBPF 模型：安全 VM + 宿主函数白名单）：同一两段式契约（info 结构化声明 + register 经宿主函数绑定 handler），以 Rune 脚本随可执行文件分发、运行时加载；**requires 决定宿主装哪些函数**——脚本结构性拿不到未声明能力（防越权），明文可改也不怕（篡改只能在白名单内作恶，防篡改不是用户层目标）；enabled 缺省 false、wire 名全局唯一等校验与 Rust 路径一致（ADR-0006）。P1 形态（检查点结论 c2）：一插件一目录——`manifest.json`（Info 声明，纯数据不执行）+ `plugin.rn`（register + handlers，目录名 = namespace）。
 _Avoid_: 脚本工具（只指入口点）、动态插件（含义过宽）
+
+**ScriptPlugin（脚本插件源描述）**:
+目录形态 Rune 脚本插件的源：`manifest.json` 反序列化出的 `Info` + `plugin.rn` 源码；经 `ScriptPlugin::from_dir` 加载（目录名必须等于 manifest.namespace），交 `KernelBuilder::script_plugin` 注册。
+_Avoid_: 脚本文件（单 .rn 形态是 P2 评估项，P1 只有目录形态）
+
+**DynamicService（动态服务接口）**:
+自定义服务被 **Rune 脚本**访问的通道（ADR-0006 检查点 a1）：`async fn call(&self, method, params) -> Result<Value, ToolError>`；脚本没有具体类型（无法 downcast），只能按 method + JSON 调用。实现并经 `ServiceHandles::with_dynamic` 注入的服务才可被脚本 requires；未实现则注册 fail-fast。Rust 插件路径不受影响（仍 downcast，ADR-0002）。
+_Avoid_: 脚本服务（它是接口不是服务实例）
 
 **Service（服务）**:
 内核插件向 kernel 提供的受控能力，在 info 中以 `provides` 声明；用户插件只能通过服务句柄访问。

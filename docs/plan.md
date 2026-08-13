@@ -7,6 +7,10 @@
 > （二进制 `sl-agent`，浏览器 Web 应用形态：HTTP/WS + 内嵌前端）；内核插件 = **Linus 模式**
 > （仅维护者编译进官方二进制，无动态内核扩展）；用户插件 = **Rune 脚本**（eBPF 模型：
 > 安全 VM + requires 函数白名单）；能力 seam 化，内核/用户插件创新不变。
+>
+> **P1 已落地**（2026-08-13）：seam 化 + AgentLoop trait + rune 宿主 + Rune 用户插件桥
+> （检查点结论：a1 DynamicService / b1 事件+日志 / c2 目录+清单 / d1 模块级函数 / e1 默认关）
+> + `sl-agent` 服务入口，浏览器 hello 回合与脚本插件端到端经真实 WS 客户端验收。
 
 ## M2：新仓库骨架（已落地）
 
@@ -56,22 +60,30 @@ requires 句柄）端到端注册并调用；AgentLoop trait 化后默认实现�
 
 | 项 | 状态 |
 |---|---|
-| ADR-0006 落地 + 文档同步（CONTEXT / plan / plugin-dev 草案） | ⏳ |
-| 能力 seam 三角形式化：Service Definition / Provider / Consumer 角色标注与命名 | ⏳ |
-| AgentLoop 抽象为 trait + 默认实现（loop 可替换第一步） | ⏳ |
-| rune 依赖 + 宿主上下文（宿主函数安装、async 调用桥） | ⏳ |
-| **Rune 用户插件桥：info() 结构化声明 + register() 绑定（脚本函数包装为 ToolHandler）+ requires 白名单注入** | ⏳（到此处暂停，先对齐方案） |
-| `sl-agent` 服务入口：HTTP/WS + 事件流/RPC 桥 + 内嵌静态资源 + 浏览器最小聊天页（前端工程化后置，纯 HTML/JS 起步） | ⏳ |
-| 门禁全绿 + hello 回合经浏览器 + Rune 插件通过 | ⏳ |
+| ADR-0006 落地 + 文档同步（CONTEXT / plan / plugin-dev 草案） | ✅ |
+| 能力 seam 三角形式化：Service Definition / Provider / Consumer 角色标注与命名 | ✅ |
+| AgentLoop 抽象为 trait + 默认实现（loop 可替换第一步） | ✅ |
+| rune 依赖 + 宿主上下文（宿主函数安装、async 调用桥） | ✅ |
+| **Rune 用户插件桥：manifest 声明 + register() 绑定（脚本函数包装为 ToolHandler）+ requires 白名单注入** | ✅（检查点结论 a1/b1/c2/d1/e1，见上） |
+| `sl-agent` 服务入口：HTTP/WS + 事件流/RPC 桥 + 内嵌静态资源 + 浏览器最小聊天页（前端工程化后置，纯 HTML/JS 起步） | ✅ |
+| 门禁全绿 + hello 回合经浏览器 + Rune 插件通过 | ✅（真实 WS 客户端冒烟验收） |
+
+> **P1 检查点记录（2026-08-13）**：Rune 用户插件桥对齐结论——
+> a) 自定义服务经新增 `DynamicService` trait（a1，未实现则 requires fail-fast）；
+> b) 脚本宿主暴露 emit_event/progress/log（b1，deadline/interrupt 推迟 P2）；
+> c) 目录形态提前到 P1（c2）：一插件一目录 manifest.json + plugin.rn；
+> d) 模块级宿主函数（d1，结构性白名单最简实现）；
+> e) rune-plugins feature 默认关、二进制启用（e1）。
+> 内核插件按 Linus 模式全程未动。
 
 ## P2：Rune 插件一等支持 + GUI 长全
 
-- 脚本插件目录约定（一插件一 .rn / 一目录）与显式清单（enabled 语义沿用 ADR-0005）；
+- 目录约定已在 P1 落地（一插件一目录：manifest.json + plugin.rn，检查点 c2）；
 - 热重载（rune 热重载）：脚本变更后撤销/重挂注册（对应 DSH 的可逆副作用语义）；
 - 事件 / 审计 / RPC 桥：脚本插件经宿主函数触发 `Event::Custom`、读审计、调通用 RPC；
 - GUI 长全：流式输出、会话列表、工具调用面板（事件/RPC 走 WS）；前端工程化（Vue/TS）
   在此阶段或 P3 定夺；
-- 插件手册 + 参考模板补 Rune 路径；examples 新增脚本插件示例。
+- 插件手册 Rune 路径与 examples 脚本插件示例已在 P1 落地。
 
 ## P3：分发形态评估（评估项）
 

@@ -48,6 +48,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 | `default_tool_timeout(Duration)` | 工具默认超时 | 30s |
 | `turn_budget(Duration)` | 单回合总预算 | 10min |
 | `loop_engine(Arc<dyn AgentLoop>)` | 注入可替换的 agent loop（Capability seam，ADR-0006）；缺省为内置默认实现 | 内置 `DefaultAgentLoop` |
+| `script_plugin(ScriptPlugin)` | 注册 Rune 脚本用户插件（feature `rune-plugins`；目录形态经 `ScriptPlugin::from_dir` 加载） | 无 |
 | `rpc_extension(Arc<dyn RpcExtension>)` | 业务 RPC 方法扩展 | 无 |
 
 ## 3. Kernel 直连 API
@@ -190,6 +191,19 @@ let service = register_openai_compatible(&registry, "deepseek", OpenAiCompatible
 写插件（用户/内核）不读本文档的其余部分：见 [docs/plugin-dev.md](plugin-dev.md) 与
 `examples/`（hello、plugins、folder_plugins）。参考模板在
 `docs/plugin-dev/reference/`（复制即开工）。
+
+## 10. `sl-agent` 服务端（feature `server`，二进制侧）
+
+`sl-agent` 是业务无关的通用 Agent 可执行文件（ADR-0006）：HTTP/WS + 内嵌前端，
+`cargo run --bin sl-agent --features server,rune-plugins` 启动后浏览器打开
+`http://127.0.0.1:8080`（`SL_AGENT_PORT` 改端口，`SL_AGENT_PLUGINS_DIR` 改插件目录，
+`SL_AGENT_API_URL/API_KEY/MODEL` 接真实 OpenAI 兼容端点，缺省 mock 模型）。
+
+WS 协议复用 §4 的帧格式：浏览器发 `RpcRequest` JSON 文本帧，服务端回
+`RpcFrame::Response`（带 id 回执）；kernel 事件流经广播推 `RpcFrame::Event`
+（`message_delta` / `reasoning_delta` / `tool_start` / `tool_end` / `turn_end` /
+`tool_progress` / `custom`…）。事件先于回执（单一有序广播路径）。HTTP 侧：
+`GET /` 与 `/{path}` 服务内嵌静态资源（`web/`），`GET /healthz` 探活。
 
 ## 10. 参考
 
