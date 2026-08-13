@@ -76,11 +76,17 @@ requires 句柄）端到端注册并调用；AgentLoop trait 化后默认实现�
 > e) rune-plugins feature 默认关、二进制启用（e1）。
 > 内核插件按 Linus 模式全程未动。
 
-## P2：Rune 插件一等支持 + GUI 长全
+## P2：会话事实日志 + Rune 一等支持 + 事件决策分离
 
-- 目录约定已在 P1 落地（一插件一目录：manifest.json + plugin.rn，检查点 c2）；
+- **会话事实日志转向（ADR-0007，第一优先）**：SessionStore → append-only 事件日志 +
+  遮蔽投影（参考 DSH `SessionEventMap` / `SurfaceOp` / 持久化契约）；编辑/重新生成/压缩
+  统一为追加 + replace 遮蔽；RPC 外层语义保持；InMemory 重写 + JSONL 落盘
+  （崩溃尾部修复，sl-agent 默认启用）；
 - 热重载（rune 热重载）：脚本变更后撤销/重挂注册（对应 DSH 的可逆副作用语义）；
 - 事件 / 审计 / RPC 桥：脚本插件经宿主函数触发 `Event::Custom`、读审计、调通用 RPC；
+- 事件决策分离（调研报告路线 1）：保留 `EventSink` 播报，新增内核插件 typed hook
+  （`before_tool` / `after_tool` / `before_model_request` / `turn_stopping`），
+  Rune 只暴露白名单筛选的观察事件；
 - GUI 长全：流式输出、会话列表、工具调用面板（事件/RPC 走 WS）；前端工程化（Vue/TS）
   在此阶段或 P3 定夺；
 - 插件手册 Rune 路径与 examples 脚本插件示例已在 P1 落地。
@@ -89,5 +95,7 @@ requires 句柄）端到端注册并调用；AgentLoop trait 化后默认实现�
 
 - web 打磨：会话持久化落盘、模型/凭据配置界面、错误与日志的用户面；
 - 配置驱动组合评估：重议 ADR-0005（profile/patch 类似物）——只有明确需求才做；
+- 会话事实日志词汇扩展评估：turn/step、raw chunk、tool 生命周期、compaction 锁、
+  fork（由 mistake 迁移需求反推，ADR-0007 第三步）；
 - mistake-agent 非特权业务迁移为 Rune 用户插件评估（其内核级业务留在自己二进制）；
 - crates.io 上架与 mistake-agent 切换重新评估（原 M5 内容后移至此）。

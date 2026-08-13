@@ -122,12 +122,16 @@ _Avoid_: 会话 ID（暗示用户可见）
 当前会话要完成的目标，作为 continue / update_goal / start_new 的决策依据；切换决策由使用方实现。
 _Avoid_: 任务名（过窄）
 
+**Session event log（会话事实日志）**:
+会话的**不可变真相**（ADR-0007）：per-session append-only 事件序列（lossless JSON、seq 连续、落盘后不修改）；事件类型 = user/assistant message、reasoning、tool/result、edit、compaction/summary；编辑/重新生成/压缩统一为「追加 + replace 遮蔽 + 投影」，可回放/恢复/审计。参考 DSH `SessionEventMap` / `SurfaceOp`。与 `EventSink`（GUI 播报）严格分离。
+_Avoid_: 会话日志（与诊断日志混淆）
+
 **Message tree（消息树）**:
-会话内消息的组织结构：每条消息有 id 与 parentId，追加式存储；编辑或重新生成时派生新分支，历史不截断。
-_Avoid_: 对话树（口语）、版本历史
+会话内消息的**投影视图**（ADR-0007 转向后）：由会话事实日志经遮蔽投影派生——模型 history 是活跃投影链，人读 transcript 是全量日志；每条消息有 id 与 parentId，编辑或重新生成 = 追加新事件 + replace 遮蔽旧消息，底层日志不可变、历史永不丢。
+_Avoid_: 会话结构（真相是事件日志，消息树只是视图）
 
 **Active path（活跃路径）**:
-消息树中从根到当前节点的唯一路径；LLM 上下文只包含活跃路径上的消息。
+会话事实日志投影出的当前会话视图末端（ADR-0007）：沿「谁遮蔽了谁」的遮蔽链回溯构成模型可见消息序列；多条遮蔽链 = 分支（switch_branch 换末端）。
 _Avoid_: 当前分支（口语）
 
 **Compaction（上下文压缩）**:
