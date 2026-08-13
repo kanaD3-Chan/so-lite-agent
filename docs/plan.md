@@ -87,11 +87,17 @@ requires 句柄）端到端注册并调用；AgentLoop trait 化后默认实现�
   `sl-agent` 默认启用（`SL_AGENT_DATA_DIR`，默认 `./data`）；
   **内核插件目录（✅ 已落地）**：`src/plugin/` + build.rs 自动发现（ADR-0036，参考
   mistake-agent），首个内核插件 `storage`（纯服务提供者，JSONL 会话存储）；
-- 热重载（rune 热重载）：脚本变更后撤销/重挂注册（对应 DSH 的可逆副作用语义）；
+- **热重载（rune 热重载，✅ 已落地）**：`ScriptPluginLoader`（目录轮询 + 变更检测 +
+  摘旧重挂 + 失败回滚）+ `Registry::remove_namespace`（可逆副作用摘除原语）+
+  `ScriptPluginHandle::reload`（线程重编译）；脚本变更热生效、语法错误回滚保留旧版、
+  目录删除卸载；manifest（requires 白名单）变更 = 重新加载；**执行超时（B2）**：
+  单次脚本调用 30s 默认超时（`with_call_timeout` 可配），死循环不卡死执行线程；
 - 事件 / 审计 / RPC 桥：脚本插件经宿主函数触发 `Event::Custom`、读审计、调通用 RPC；
 - 事件决策分离（调研报告路线 1）：保留 `EventSink` 播报，新增内核插件 typed hook
   （`before_tool` / `after_tool` / `before_model_request` / `turn_stopping`），
   Rune 只暴露白名单筛选的观察事件；
+- 不可信插件加固（后续项）：`session_read` 越权收窄（多会话场景）、emit_event/log
+  洪泛配额——单机单用户场景可接受，多用户/多租户由下游在服务层控制；
 - GUI 长全：流式输出、会话列表、工具调用面板（事件/RPC 走 WS）；前端工程化（Vue/TS）
   在此阶段或 P3 定夺；
 - 插件手册 Rune 路径与 examples 脚本插件示例已在 P1 落地。

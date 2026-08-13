@@ -63,8 +63,9 @@ impl ModelHandle {
         }
     }
 
-    /// 内核装配用：取回底层服务（KernelBuilder / 内核插件）。
-    pub fn inner(&self) -> Arc<dyn ModelService> {
+    /// 内核装配用：取回底层服务（仅 KernelBuilder / 内核插件，TM-004——
+    /// 不外露原始服务，防止下游绕过超时/审计包装）。
+    pub(crate) fn inner(&self) -> Arc<dyn ModelService> {
         self.inner.clone()
     }
 

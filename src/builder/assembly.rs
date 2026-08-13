@@ -225,6 +225,8 @@ impl KernelBuilder {
                     logger.clone(),
                     handlers_arc.clone(),
                     wire_arc.clone(),
+                    // 脚本调用超时（B2 不可信插件防护，默认 30s）。
+                    std::time::Duration::from_secs(30),
                 )?;
                 registry.register_script(handle)?;
             }

@@ -162,6 +162,30 @@ impl DynamicService for MyNotesService {
 
 示例见 [examples/script_plugin.rs](../examples/script_plugin.rs)（加载仓库内 `plugins/demo/`）。
 
+### 热重载与执行超时（P2，不可信插件防护）
+
+- **热重载**：`rune::ScriptPluginLoader` 轮询插件目录（manifest.json / plugin.rn 变更），
+  变更时「摘旧条目（`Registry::remove_namespace`）→ 线程重编译
+  （`ScriptPluginHandle::reload`）→ 重新登记」，失败回滚保留旧版；目录删除 = 卸载。
+  仅脚本内容变更 = 原地热重载（复用执行线程）；manifest（requires/tools 声明）变更
+  = 白名单规格变化，整体重新加载（换线程）。下游 fork 定制者把插件目录交给 loader，
+  后台 `run_loop(interval)` 自动轮询：
+
+  ```rust
+  let loader = Arc::new(ScriptPluginLoader::new(
+      plugins_dir, kernel.registry().clone(), services, events, logger,
+  ));
+  loader.load_all()?;                       // 首次全量加载
+  tokio::spawn(loader.clone().run_loop(Duration::from_secs(1)));  // 后台轮询
+  ```
+
+- **执行超时（B2）**：单次脚本调用默认 30s 超时（`with_call_timeout` 可配）——
+  死循环/慢脚本不会卡死执行线程（dispatch 的工具超时只中止 wrapper，执行线程
+  上真正跑脚本，由本超时兜底）。超时 = 本次调用失败，脚本线程存活、后续调用不受影响；
+- **不可信边界提示**：`session_read(key)` 接受任意会话 key（单机单用户场景可接受）；
+  多用户/多租户场景请在下游 `DynamicService` 实现层做会话范围控制；
+  `emit_event`/`log` 无配额（单 agent 场景可接受，后续可加）。
+
 ## 目录编排（推荐约定）
 
 契约与代码放哪无关，但推荐**一插件一目录**（沿用 mistake-agent 的组织风格，不含它的编译期发现语义）：

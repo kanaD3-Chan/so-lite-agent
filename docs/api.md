@@ -52,6 +52,21 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 | `script_plugin(ScriptPlugin)` | 注册 Rune 脚本用户插件（feature `rune-plugins`；目录形态经 `ScriptPlugin::from_dir` 加载） | 无 |
 | `rpc_extension(Arc<dyn RpcExtension>)` | 业务 RPC 方法扩展 | 无 |
 
+## 2.5 Rune 脚本插件热重载（`rune::ScriptPluginLoader`，feature `rune-plugins`）
+
+热重载原语（下游 fork 定制者直接继承，见 [plugin-dev.md](plugin-dev.md) §热重载）：
+
+- `ScriptPluginLoader::new(dir, registry, services, events, logger)`：持有插件目录，
+  轮询变更（manifest.json / plugin.rn）；
+- `load_all()`：首次全量加载（懒登记，首次命中工具才绑定）；
+- `poll()`：检测变更并热重载——脚本变更 = 摘旧条目 + 线程重编译 + 重新登记；
+  语法错误回滚保留旧版；manifest（requires）变更 = 整体重新加载；目录删除 = 卸载；
+- `run_loop(interval)`：后台轮询循环（`tokio::spawn`）；
+- 配套：`Registry::remove_namespace(ns)`（摘除插件全部注册痕迹）、
+  `ScriptPluginHandle::reload(script)`（线程重编译，失败保留旧 VM）；
+- **执行超时**：单次脚本调用默认 30s（`ScriptPluginLoader::with_call_timeout` 可配），
+  死循环不卡死执行线程（B2 不可信插件防护）。
+
 ## 3. Kernel 直连 API
 
 | 方法 | 说明 |

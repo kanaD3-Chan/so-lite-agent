@@ -17,9 +17,11 @@
 //! 不复制 rune 源码（ADR-0006 影响分析）。
 
 mod host;
+mod loader;
 mod plugin;
 mod vm;
 
 pub use host::HostError;
+pub use loader::ScriptPluginLoader;
 pub use plugin::{ScriptPlugin, ScriptPluginHandle};
 pub use vm::{CallError, CompileError, ScriptVm};

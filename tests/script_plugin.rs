@@ -279,5 +279,13 @@ fn _handle_signature_smoke(
     >,
     wire: Arc<std::sync::RwLock<std::collections::HashMap<String, String>>>,
 ) -> Result<ScriptPluginHandle, PluginError> {
-    ScriptPluginHandle::new(plugin, services, events, logger, handlers, wire)
+    ScriptPluginHandle::new(
+        plugin,
+        services,
+        events,
+        logger,
+        handlers,
+        wire,
+        std::time::Duration::from_secs(30),
+    )
 }

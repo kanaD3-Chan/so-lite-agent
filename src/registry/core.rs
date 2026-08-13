@@ -233,6 +233,33 @@ impl Registry {
         result
     }
 
+    /// 摘除一个插件的全部注册痕迹（热重载/卸载用，ADR-0006 可逆副作用语义）：
+    /// entries 登记、handlers 条目、wire 反查条目。摘除后同名插件可重新注册。
+    /// 返回 true = 已摘除；false = namespace 不存在。
+    pub fn remove_namespace(&self, namespace: &str) -> bool {
+        let removed = {
+            let mut entries = self.entries.write().expect("registry poisoned");
+            entries.remove(namespace).is_some()
+        };
+        if !removed {
+            return false;
+        }
+        // 摘除 handlers 与该 namespace 相关的全部条目（含 wire 反查）。
+        let mut handlers = self.handlers.write().expect("registry poisoned");
+        let mut wire = self.wire_to_full.write().expect("registry poisoned");
+        let prefix = format!("{namespace}::");
+        let dropped: Vec<String> = handlers
+            .keys()
+            .filter(|k| k.starts_with(&prefix))
+            .cloned()
+            .collect();
+        for full in dropped {
+            wire.remove(&full_to_wire(&full));
+            handlers.remove(&full);
+        }
+        true
+    }
+
     pub fn ensure_tool(&self, full: &str) -> Result<RegisteredEntry, PluginError> {
         self.ensure(full, EntryKind::Tool)
     }

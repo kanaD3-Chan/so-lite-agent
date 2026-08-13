@@ -71,6 +71,13 @@ enum Msg {
         params: serde_json::Value,
         reply: oneshot::Sender<Result<serde_json::Value, String>>,
     },
+    /// 热重载：用新脚本源码重编译（复用执行线程与白名单模块）。
+    /// 成功 = 新 VM 就绪、BINDINGS 已清空（等下次 register() 重绑）；
+    /// 失败 = 保留旧 VM（回滚），旧绑定不受影响。
+    Reload {
+        script: String,
+        reply: std::sync::mpsc::Sender<Result<(), String>>,
+    },
 }
 
 /// 目录形态的 Rune 脚本插件（源描述：manifest 声明 + 脚本源码）。
@@ -117,9 +124,12 @@ struct WhitelistSpec {
     /// 包装器（注册表内）发 Call 消息用；与 handle 侧同一通道。
     tx: UnboundedSender<Msg>,
     script: String,
+    /// 单次脚本调用超时（B2 不可信插件防护；死循环不能卡死执行线程）。
+    call_timeout: std::time::Duration,
 }
 
 /// 编译完成、按 requires 裁剪好白名单的脚本插件运行时（注册表登记 + 懒加载执行）。
+#[derive(Clone)]
 pub struct ScriptPluginHandle {
     info: Info,
     /// 通往执行线程的通道（注册表登记 + 工具调用都经它）。
@@ -136,6 +146,7 @@ impl ScriptPluginHandle {
         logger: LoggerHandle,
         handlers: Arc<RwLock<HashMap<String, RegisteredEntry>>>,
         wire_to_full: Arc<RwLock<HashMap<String, String>>>,
+        call_timeout: std::time::Duration,
     ) -> Result<Self, PluginError> {
         let ScriptPlugin { manifest, script } = plugin;
 
@@ -190,6 +201,7 @@ impl ScriptPluginHandle {
             wire_to_full,
             tx: tx.clone(),
             script,
+            call_timeout,
         };
         let (ready_tx, ready_rx) = std::sync::mpsc::channel();
         std::thread::Builder::new()
@@ -213,6 +225,26 @@ impl ScriptPluginHandle {
         let (reply_tx, reply_rx) = std::sync::mpsc::channel();
         self.tx
             .send(Msg::Register { reply: reply_tx })
+            .map_err(|_| PluginError::Internal("脚本执行线程已退出".into()))?;
+        reply_rx
+            .recv()
+            .map_err(|e| PluginError::Internal(format!("脚本执行线程退出：{e}")))?
+            .map_err(PluginError::Internal)
+    }
+
+    /// 热重载：用新脚本源码重编译（复用执行线程与白名单模块；requires 变更需
+    /// 先卸载再重新注册，本方法只换脚本内容）。失败 = 保留旧脚本（回滚）。
+    ///
+    /// 调用方流程（配合 [`crate::registry::Registry::remove_namespace`]）：
+    /// `remove_namespace(ns)` 摘旧条目 → `reload(new_script)` 重编译 →
+    /// `register()` 重挂绑定（懒加载会再次触发，或显式调用）。
+    pub fn reload(&self, script: &str) -> Result<(), PluginError> {
+        let (reply_tx, reply_rx) = std::sync::mpsc::channel();
+        self.tx
+            .send(Msg::Reload {
+                script: script.to_string(),
+                reply: reply_tx,
+            })
             .map_err(|_| PluginError::Internal("脚本执行线程已退出".into()))?;
         reply_rx
             .recv()
@@ -275,6 +307,7 @@ fn run_script_thread(
             }
         };
         let _ = ready.send(Ok(()));
+        let mut vm = vm;
 
         // ---- 消息循环 ----
         while let Some(msg) = rx.recv().await {
@@ -291,8 +324,23 @@ fn run_script_thread(
                     params,
                     reply,
                 } => {
-                    let res = run_call(&spec.namespace, &short, params).await;
+                    let res = run_call(&spec.namespace, &short, params, spec.call_timeout).await;
                     let _ = reply.send(res);
+                }
+                Msg::Reload { script, reply } => {
+                    // 热重载：新脚本重编译；失败保留旧 VM（回滚），成功替换并清空绑定表。
+                    match ScriptVm::compile_with_context(&script, &context) {
+                        Ok(new_vm) => {
+                            BINDINGS.with(|b| {
+                                b.borrow_mut().remove(&spec.namespace);
+                            });
+                            vm = new_vm;
+                            let _ = reply.send(Ok(()));
+                        }
+                        Err(e) => {
+                            let _ = reply.send(Err(e.to_string()));
+                        }
+                    }
                 }
             }
         }
@@ -327,10 +375,14 @@ fn verify_bound(
 }
 
 /// 线程内执行一次脚本 handler 调用（rune 值全程不离开本线程）。
+/// 带执行超时（B2，不可信插件防护）：脚本死循环不能卡死执行线程——
+/// dispatch 层的工具超时只 abort wrapper future，执行线程上真正跑脚本，
+/// 必须在这里兜底。超时后返回错误（脚本副作用：本调用失败，线程存活）。
 async fn run_call(
     namespace: &str,
     short: &str,
     params: serde_json::Value,
+    call_timeout: std::time::Duration,
 ) -> Result<serde_json::Value, String> {
     let function = BINDINGS
         .with(|b| {
@@ -344,15 +396,25 @@ async fn run_call(
     // `Function::call` 无 Send 约束（async_send_call 的参数必须 Send，rune Value 不是）。
     // 同步 handler 直接出结果；async handler 同步执行到挂起点返回 rune Future 值，
     // 在本地（非 Send 要求）await 收尾——复刻 rune 内部 async_send_call 的语义。
-    let value: RuneValue = function
-        .call((arg,))
-        .into_result()
-        .map_err(|e| e.to_string())?;
-    let value = match value.clone().into_future() {
-        Ok(future) => future.await.into_result().map_err(|e| e.to_string())?,
-        Err(_) => value,
+    // rune 的 await 在 current-thread runtime 内执行；tokio timeout 包一层，
+    // 超时即取消整个 handler future（含其 async 宿主函数调用链）。
+    let future = async move {
+        let value: RuneValue = function
+            .call((arg,))
+            .into_result()
+            .map_err(|e| e.to_string())?;
+        let value = match value.clone().into_future() {
+            Ok(future) => future.await.into_result().map_err(|e| e.to_string())?,
+            Err(_) => value,
+        };
+        json_from_value(&value).map_err(|e| e.to_string())
     };
-    json_from_value(&value).map_err(|e| e.to_string())
+    match tokio::time::timeout(call_timeout, future).await {
+        Ok(res) => res,
+        Err(_) => Err(format!(
+            "脚本调用超时（>{call_timeout:?}）：{namespace}::{short}"
+        )),
+    }
 }
 
 /// JSON 值转 rune Value；错误经 `VmResult::panic` 抛给脚本调用点

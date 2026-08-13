@@ -173,6 +173,13 @@ KernelBuilder::new().register_plugin(desc);
 > 规划：ADR-0008（P3）将内核插件从目录升级为**独立 crate**（`crates/plugin-*/`），
 > 整个 workspace 编译成一个二进制；P3 前保持目录形态。
 
+**Rune 脚本插件热重载（P2 落地）**：`rune::ScriptPluginLoader` 轮询插件目录，变更时
+`Registry::remove_namespace` 摘旧条目 → `ScriptPluginHandle::reload` 线程重编译 →
+重新登记（懒加载重绑）；失败回滚保留旧版。执行线程复用（reload 只换 VM），
+manifest 变更（requires 白名单变化）整体重新加载（换线程）。单次脚本调用 30s
+超时（`with_call_timeout` 可配）——死循环不卡死执行线程（dispatch 超时只中止
+wrapper，执行线程上真正跑脚本，由 rune 桥超时兜底）。
+
 ## 6. 服务句柄
 
 `ServiceId` 是字符串背书的 newtype：内置 `session()` / `model()`，业务服务用

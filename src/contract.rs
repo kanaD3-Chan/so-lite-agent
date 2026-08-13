@@ -28,7 +28,7 @@ pub enum LoadPolicy {
 }
 
 /// 插件静态元数据（两段式契约第一阶段）。
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
 pub struct Info {
     pub namespace: String,
     /// 启用标记：**默认 false**——插件必须显式 `enabled: true` 才会注册；
@@ -53,7 +53,7 @@ pub struct Info {
 
 /// 工具定义：短名 + 描述 + 参数 schema + 调用方策略。
 /// handler 不在 info 中，register 阶段绑定（两段式契约）。
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ToolDef {
     pub name: String,
     /// 是否对用户可见（功能中心展示）；false = 仅模型可调，不出现在用户面板。
@@ -77,7 +77,7 @@ pub struct ToolDef {
 }
 
 /// 命令定义：GUI/用户触发，恒为 UserOnly。
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct CommandDef {
     pub name: String,
     #[serde(default = "default_true")]
@@ -94,7 +94,7 @@ pub struct CommandDef {
 }
 
 /// 事件定义：kernel 生命周期回调，不对外暴露。
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct EventDef {
     pub name: String,
 }
