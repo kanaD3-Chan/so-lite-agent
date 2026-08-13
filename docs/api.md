@@ -189,8 +189,8 @@ let service = register_openai_compatible(&registry, "deepseek", OpenAiCompatible
 事件 = `{ seq, message, surface_op?, source_event_seqs?, created_at }`；`message.kind`
 即事件判别（User → user/message、Assistant → assistant/message、Reasoning →
 assistant/reasoning、ToolCall → tool/result、System → compaction/summary）；
-`SurfaceOp`：`Append` 或 `Replace { start, end }`（编辑/重新生成/压缩统一走 replace
-遮蔽旧事件，`source_event_seqs` 记录被遮蔽 seq 全集）。投影纯函数
+`SurfaceOp`：`Append` 或 `Replace { start, end }`（编辑（user "改完重发"）/压缩统一走 replace
+遮蔽旧事件，`source_event_seqs` 记录被遮蔽 seq 全集；**重新生成（改写 assistant）禁用**）。投影纯函数
 `fold_surface` / `chain_from` / `project_messages` 从 `services` 导出，供内核/测试复用。
 
 `Message` 为投影视图节点（id/parent_id + kind）；`MessageKind`：`user`（含

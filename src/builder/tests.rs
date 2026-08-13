@@ -268,27 +268,43 @@ async fn jsonl_store_full_turn_persists_and_restores() {
         crate::message::MessageKind::ToolCall { entry, .. } if entry == "demo::echo"
     )));
 
-    // 编辑第一条 assistant：遮蔽其到链尾的节点，活跃链 = [user, 新回答]。
+    // 编辑 user 消息（"改完重发"）：遮蔽到链尾的节点，活跃链 = [改后的问题]。
+    let user_id = msgs
+        .iter()
+        .find(|m| matches!(m.kind, crate::message::MessageKind::User { .. }))
+        .map(|m| m.id)
+        .expect("应有 user 消息");
+    let edited = kernel
+        .edit_message(key, user_id, "改后的问题")
+        .await
+        .unwrap();
+    assert_eq!(
+        edited.len(),
+        1,
+        "编辑 user 后链 = [改后的问题]（旧后续被遮蔽）"
+    );
+    assert!(matches!(
+        &edited[0].kind,
+        crate::message::MessageKind::User { text, .. } if text == "改后的问题"
+    ));
+    // 重新生成已禁用：编辑 assistant 消息必须被拒绝。
     let assistant_id = msgs
         .iter()
         .find(|m| matches!(m.kind, crate::message::MessageKind::Assistant { .. }))
         .map(|m| m.id)
         .expect("应有 assistant 消息");
-    let edited = kernel
-        .edit_message(key, assistant_id, "改后的回答")
-        .await
-        .unwrap();
-    assert_eq!(edited.len(), 2);
-    assert!(matches!(
-        &edited[1].kind,
-        crate::message::MessageKind::Assistant { text } if text == "改后的回答"
-    ));
+    assert!(
+        kernel
+            .edit_message(key, assistant_id, "改写")
+            .await
+            .is_err()
+    );
     // 重开后编辑仍生效（遮蔽是事件日志的一部分）。
     let reloaded2 = crate::services::JsonlSessionStore::open(dir.path()).unwrap();
     let msgs2 = reloaded2.read_path(&key).await.unwrap();
-    assert_eq!(msgs2.len(), 2);
+    assert_eq!(msgs2.len(), 1);
     assert!(matches!(
-        &msgs2[1].kind,
-        crate::message::MessageKind::Assistant { text } if text == "改后的回答"
+        &msgs2[0].kind,
+        crate::message::MessageKind::User { text, .. } if text == "改后的问题"
     ));
 }

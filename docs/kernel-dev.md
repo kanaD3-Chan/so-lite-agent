@@ -248,8 +248,8 @@ seq 连续、落盘后不可修改），消息历史由**遮蔽投影**派生（
   `read_events`（全量日志）/ `resolve_seq`（消息 id → 事件 seq）；
 - 投影：`read_path`（活跃链）/ `read_path_from(end_seq)`（任意末端，分支）/
   `set_active_path` / `read_all`（全量日志 → 消息，人读 transcript）；
-- 编辑/重新生成/压缩统一为「追加事件 + `SurfaceOp::Replace` 遮蔽旧事件 +
-  `source_event_seqs` 记录被遮蔽 seq」；投影纯函数 `fold_surface` / `chain_from`
+- 编辑（user "改完重发"）/压缩统一为「追加事件 + `SurfaceOp::Replace` 遮蔽旧事件 +
+  `source_event_seqs` 记录被遮蔽 seq」；**重新生成（改写 assistant）禁用**；投影纯函数 `fold_surface` / `chain_from`
   / `project_messages` 从 `services` 导出。
 
 活跃链从末端沿遮蔽链回溯；LLM 上下文只包含活跃链投影。会话切换的**决策**（新消息

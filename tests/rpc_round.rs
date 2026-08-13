@@ -132,21 +132,34 @@ async fn edit_message_derives_branch() {
     kernel.send_user_message(key, "你好").await.unwrap();
 
     let messages = kernel.read_session(&key).await.unwrap();
+    let user = messages
+        .iter()
+        .find(|m| matches!(m.kind, MessageKind::User { .. }))
+        .expect("应有 user 消息");
     let assistant = messages
         .iter()
         .find(|m| matches!(m.kind, MessageKind::Assistant { .. }))
         .expect("应有 assistant 消息");
 
+    // 编辑 user（"改完重发"）：遮蔽到链尾，新链 = [改后的问题]。
     let new_path = kernel
-        .edit_message(key, assistant.id, "改写的回答")
+        .edit_message(key, user.id, "改后的问题")
         .await
         .unwrap();
-    assert_eq!(new_path.len(), 2); // user + 改写分支
+    assert_eq!(new_path.len(), 1); // user 编辑遮蔽到链尾
     assert!(matches!(
-        &new_path[1].kind,
-        MessageKind::Assistant { text } if text == "改写的回答"
+        &new_path[0].kind,
+        MessageKind::User { text, .. } if text == "改后的问题"
     ));
 
+    // 重新生成已禁用：编辑 assistant 被拒绝。
+    assert!(
+        kernel
+            .edit_message(key, assistant.id, "改写")
+            .await
+            .is_err()
+    );
+
     let all = kernel.read_session(&key).await.unwrap();
-    assert_eq!(all.len(), 2); // 活跃路径 = user + 改写分支
+    assert_eq!(all.len(), 1); // 活跃路径 = 改后的问题
 }

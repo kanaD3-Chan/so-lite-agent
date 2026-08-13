@@ -223,8 +223,12 @@ impl Kernel {
         })
     }
 
-    /// 编辑消息：追加新 assistant 事件，replace 遮蔽从被编辑消息到链尾的全部节点
-    /// （编辑 = 派生新分支，编辑点之后的历史留在日志但不属于活跃路径，ADR-0007）。
+    /// 编辑消息：追加新 user 事件，replace 遮蔽从被编辑消息到链尾的全部节点
+    /// （"改完重发"语义：编辑用户自己的输入，附件保留，重新驱动模型；
+    /// 编辑点之后的历史留在日志但不属于活跃路径，ADR-0007）。
+    ///
+    /// 只允许编辑 user 消息；assistant 消息不支持改写（**重新生成已禁用**——
+    /// 对 assistant 的 replace 遮蔽不开放任何入口）。
     pub async fn edit_message(
         &self,
         key: SessionKey,
@@ -242,9 +246,9 @@ impl Kernel {
             .iter()
             .find(|e| e.seq == seq)
             .ok_or_else(|| LoopError::Internal("编辑目标事件不存在".into()))?;
-        if !matches!(original.message.kind, MessageKind::Assistant { .. }) {
-            return Err(LoopError::Internal("只能编辑 assistant 消息".into()));
-        }
+        let MessageKind::User { attachments, .. } = &original.message.kind else {
+            return Err(LoopError::Internal("只能编辑 user 消息".into()));
+        };
         // 被遮蔽区间 = [被编辑消息 ..= 链尾]（编辑点之后全部丢出新活跃路径）。
         let start_idx = fold
             .chain
@@ -255,10 +259,15 @@ impl Kernel {
         let end = *shadowed
             .last()
             .ok_or_else(|| LoopError::Internal("活跃链为空".into()))?;
-        let mut edit_event = SessionEvent::new(
-            Message::assistant(text),
-            SurfaceOp::Replace { start: seq, end },
-        );
+        // 新 user 消息：文本替换（作为模型指令与展示文本），附件保留（改完重发）。
+        let mut new_msg = Message::user_with_display(text, None);
+        if let MessageKind::User {
+            attachments: atts, ..
+        } = &mut new_msg.kind
+        {
+            *atts = attachments.clone();
+        }
+        let mut edit_event = SessionEvent::new(new_msg, SurfaceOp::Replace { start: seq, end });
         edit_event.source_event_seqs = shadowed;
         let stored = self
             .store

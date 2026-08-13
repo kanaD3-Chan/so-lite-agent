@@ -17,8 +17,8 @@ per-session 序号连续、落盘后不可修改：
 
 | 事件 | 载荷 | 说明 |
 |---|---|---|
-| `user/message` | text + attachments | 用户消息（append） |
-| `assistant/message` | text | 助手消息；**重新生成 = 新事件带 replace 遮蔽旧 assistant** |
+| `user/message` | text + attachments | 用户消息（append）；**编辑 = 追加新 user 事件 replace 遮蔽旧 user 及其后链尾（"改完重发"语义，附件保留）** |
+| `assistant/message` | text | 助手消息（append）；**重新生成（replace 遮蔽旧 assistant）事件模型支持但当前禁用**——不开放任何入口 |
 | `assistant/reasoning` | text | 推理消息（对应现有 `MessageKind::Reasoning`） |
 | `tool/result` | entry + params + result | 工具调用（对应现有 `MessageKind::ToolCall`，P2 合并 call/result，P3 再拆生命周期） |
 | `edit` | 新消息 + 被编辑 seq | 用户编辑 = 追加新消息 + replace 遮蔽旧消息（历史保留在日志） |
