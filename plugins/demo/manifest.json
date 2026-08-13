@@ -1,0 +1,13 @@
+{
+  "namespace": "demo",
+  "enabled": true,
+  "requires": ["session"],
+  "tools": [
+    {
+      "name": "ping",
+      "description": "回显参数并上报会话数",
+      "params": { "type": "object" },
+      "policy": "user_and_model"
+    }
+  ]
+}

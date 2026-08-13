@@ -1,0 +1,9 @@
+pub fn register() {
+    tool("ping", handle_ping)
+}
+
+async fn handle_ping(params) {
+    let sessions = session_list().await;
+    emit_event("demo.ping", #{ "count": sessions.len() });
+    #{ "pong": params, "session_count": sessions.len() }
+}
