@@ -62,6 +62,7 @@ async fn rpc_method_subset_round_trip() {
                 session_key: None,
                 text: "你好".into(),
                 attachments: Vec::new(),
+                force_tool: None,
             },
         })
         .await;

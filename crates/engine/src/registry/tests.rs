@@ -365,3 +365,49 @@ fn kernel_and_user_wire_collision_rejected() {
         Err(PluginError::WireNameCollision(_))
     ));
 }
+
+#[test]
+fn model_tools_carries_plugin_declared_title_and_icon() {
+    // ADR-0012 工具声明只在插件：插件 info 声明的 title/icon 必须随 model_tools
+    // 下发（list_tools 是展示元数据唯一事实源），不得在引擎侧丢弃。
+    let registry = Registry::new(ServiceHandles::default(), logger());
+    let desc = PluginDescriptor {
+        info: Info {
+            namespace: "demo".into(),
+            enabled: true,
+            tools: vec![ToolDef {
+                name: "hello".into(),
+                user_visible: true,
+                title: Some("打招呼".into()),
+                group: Some("自检".into()),
+                description: "链路自检".into(),
+                params: crate::contract::empty_params(),
+                policy: CallerPolicy::UserAndModel,
+                timeout: None,
+                icon: Some("mdi:hand-wave".into()),
+            }],
+            ..Default::default()
+        },
+        register: |_| Ok(()),
+    };
+    registry.register_plugin(desc).unwrap();
+    let tools = registry.model_tools();
+    assert_eq!(tools.len(), 1);
+    assert_eq!(tools[0].name, "demo__hello");
+    assert_eq!(tools[0].title.as_deref(), Some("打招呼"));
+    assert_eq!(tools[0].icon.as_deref(), Some("mdi:hand-wave"));
+    // 未声明 title/icon 的工具不下发字段（Option None，serde skip）
+    let bare = Registry::new(ServiceHandles::default(), logger());
+    let desc2 = PluginDescriptor {
+        info: Info {
+            namespace: "demo".into(),
+            enabled: true,
+            tools: vec![tool_def("bare", "无元数据", CallerPolicy::UserAndModel)],
+            ..Default::default()
+        },
+        register: |_| Ok(()),
+    };
+    bare.register_plugin(desc2).unwrap();
+    assert_eq!(bare.model_tools()[0].title, None);
+    assert_eq!(bare.model_tools()[0].icon, None);
+}

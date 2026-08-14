@@ -19,6 +19,19 @@ pub struct RpcAttachment {
     pub name: Option<String>,
 }
 
+/// 显式工具调用请求（mistake-agent 同款语义，参考实现 AGPL 注明来源）：
+/// entry 为内部全名（namespace::tool）；hint 为用户输入的可选参数文本；
+/// display 为前端原始展示文本（缺省时 kernel 按 entry_title＋hint 兜底，
+/// 落盘到 user 消息的 display_text，重开会话后渲染仍友好）。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ForcedToolRequest {
+    pub entry: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub hint: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub display: Option<String>,
+}
+
 /// 通用方法子集；业务方法走 [`Method::Custom`] + [`RpcExtension`]。
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
@@ -30,6 +43,11 @@ pub enum Method {
         text: String,
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
         attachments: Vec<RpcAttachment>,
+        /// 显式工具调用：开回合强制模型首轮调用指定工具（tool_choice +
+        /// 整回合关闭思考），工具结果回填后由模型继续生成回复——不绕过 LLM
+        /// （唯一决策者不变）；展示文本（display）与模型指令（text）分离落盘。
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        force_tool: Option<ForcedToolRequest>,
     },
     TriggerCommand {
         entry: String,

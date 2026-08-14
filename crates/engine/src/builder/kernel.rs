@@ -9,7 +9,7 @@ use crate::agent::dispatch::Dispatch;
 use crate::agent::r#loop::{AgentLoop, LoopError, TurnInput, TurnOutcome};
 use crate::agent::session::{InterruptBus, SessionKey, SessionMeta};
 use crate::audit::{AuditRecord, Auditor};
-use crate::contract::ToolError;
+use crate::contract::{CallerPolicy, ToolError, full_to_wire};
 use crate::events::EventSink;
 use crate::message::{Attachment, Message, MessageId, MessageKind};
 use crate::model::{AbortSignal, ToolSchema};
@@ -114,6 +114,34 @@ impl Kernel {
         text: &str,
         attachments: Vec<Attachment>,
     ) -> Result<TurnOutcome, LoopError> {
+        self.send_user_message_inner(key, text, None, attachments, None)
+            .await
+    }
+
+    /// 显式工具调用（mistake-agent 同款语义，ADR-0012）：text 为模型指令文本，
+    /// display_text 为落盘展示文本（两者分离），forced_wire 为强制首轮调用的
+    /// wire name（None = 普通回合）。loop 层已支持首轮 tool_choice + 整回合
+    /// 关闭思考（TurnInput.forced_tool），本方法只负责校验后的接线与落盘。
+    pub async fn send_user_message_forced(
+        &self,
+        key: SessionKey,
+        text: &str,
+        display_text: Option<String>,
+        attachments: Vec<Attachment>,
+        forced_wire: String,
+    ) -> Result<TurnOutcome, LoopError> {
+        self.send_user_message_inner(key, text, display_text, attachments, Some(forced_wire))
+            .await
+    }
+
+    async fn send_user_message_inner(
+        &self,
+        key: SessionKey,
+        text: &str,
+        display_text: Option<String>,
+        attachments: Vec<Attachment>,
+        forced_wire: Option<String>,
+    ) -> Result<TurnOutcome, LoopError> {
         if self
             .store
             .get_session(&key)
@@ -127,7 +155,7 @@ impl Kernel {
                 .map_err(session_err)?;
         }
 
-        let mut user_msg = Message::user(text);
+        let mut user_msg = Message::user_with_display(text, display_text);
         if let MessageKind::User {
             attachments: atts, ..
         } = &mut user_msg.kind
@@ -151,7 +179,7 @@ impl Kernel {
                 tools,
                 signal,
                 turn_budget: self.turn_budget,
-                forced_tool: None,
+                forced_tool: forced_wire,
             })
             .await;
         *self.active.lock().expect("active poisoned") = None;
@@ -326,6 +354,7 @@ impl Kernel {
                 session_key,
                 text,
                 attachments,
+                force_tool,
             } => {
                 let key = session_key.unwrap_or_default();
                 let atts: Vec<Attachment> = attachments
@@ -337,10 +366,62 @@ impl Kernel {
                         data_base64: None,
                     })
                     .collect();
-                match self
-                    .send_user_message_with_attachments(key, &text, atts)
-                    .await
-                {
+                // 显式工具调用（mistake-agent 同款）：校验工具 + UserOnly 拒绝，
+                // 构造模型指令文本与落盘展示文本（分离），开回合强制首轮调用。
+                let (instr, display, forced_wire) = match &force_tool {
+                    None => (text.clone(), None, None),
+                    Some(ft) => {
+                        let entry = match self.registry.ensure_tool(&ft.entry) {
+                            Ok(e) => e,
+                            Err(e) => {
+                                return RpcFrame::err(
+                                    id,
+                                    RpcError::new("unknown_tool", e.to_string()),
+                                );
+                            }
+                        };
+                        if entry.policy == CallerPolicy::UserOnly {
+                            return RpcFrame::err(
+                                id,
+                                RpcError::new(
+                                    "forbidden_tool",
+                                    "该工具仅用户可调，不能被模型强制调用",
+                                ),
+                            );
+                        }
+                        let hint = ft.hint.as_deref().unwrap_or("").trim();
+                        let instr = if hint.is_empty() {
+                            format!("请调用工具 {} 处理当前请求。", ft.entry)
+                        } else {
+                            format!("请调用工具 {} 处理：{}", ft.entry, hint)
+                        };
+                        let display =
+                            ft.display
+                                .clone()
+                                .filter(|s| !s.trim().is_empty())
+                                .or_else(|| {
+                                    self.registry.entry_title(&ft.entry).map(|title| {
+                                        if hint.is_empty() {
+                                            title
+                                        } else {
+                                            format!("{title}：{hint}")
+                                        }
+                                    })
+                                });
+                        (instr, display, Some(full_to_wire(&ft.entry)))
+                    }
+                };
+                let result = match forced_wire {
+                    Some(wire) => {
+                        self.send_user_message_forced(key, &instr, display, atts, wire)
+                            .await
+                    }
+                    None => {
+                        self.send_user_message_with_attachments(key, &instr, atts)
+                            .await
+                    }
+                };
+                match result {
                     Ok(outcome) => RpcFrame::ok(
                         id,
                         json!({
