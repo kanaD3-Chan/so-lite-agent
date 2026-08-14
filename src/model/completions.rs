@@ -132,6 +132,9 @@ impl ModelService for ChatCompletionsModelService {
                 std::collections::BTreeMap::new();
             let mut text_done = false;
             let mut done = false;
+            // thinking 模式：reasoning 文本流要带 item 边界（Start/End），
+            // 否则 reasoning 进不了消息历史，下一轮无法回传（opencode 端点要求）。
+            let mut reasoning_started = false;
             loop {
                 let next = tokio::select! {
                     chunk = byte_stream.next() => chunk,
@@ -144,6 +147,13 @@ impl ModelService for ChatCompletionsModelService {
                             if ev.name == "data" || ev.name.is_empty() {
                                 let data = ev.data.trim();
                                 if data == "[DONE]" {
+                                    if reasoning_started {
+                                        let _ = tx
+                                            .send(Ok(ModelChunk::ItemDone {
+                                                kind: ItemKind::Reasoning,
+                                            }))
+                                            .await;
+                                    }
                                     for (index, (call_id, name, args)) in calls.iter() {
                                         let _ = tx
                                             .send(Ok(ModelChunk::ToolCallStart {
@@ -196,6 +206,14 @@ impl ModelService for ChatCompletionsModelService {
                                             tx.send(Ok(ModelChunk::TextDelta(t.to_string()))).await;
                                     }
                                     if let Some(r) = delta["reasoning_content"].as_str() {
+                                        if !reasoning_started {
+                                            reasoning_started = true;
+                                            let _ = tx
+                                                .send(Ok(ModelChunk::ReasoningItemStart {
+                                                    id: format!("r{}", calls.len()),
+                                                }))
+                                                .await;
+                                        }
                                         let _ = tx
                                             .send(Ok(ModelChunk::ReasoningDelta(r.to_string())))
                                             .await;
