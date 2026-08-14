@@ -12,9 +12,22 @@ use crate::model::{
     ResponseFormat, TokenUsage, ToolChoice,
 };
 
-use super::openai::{SseParser, map_status_error, messages_to_cc, reqwest_chain, tool_to_function};
+use super::openai::{SseParser, map_status_error, messages_to_cc, reqwest_chain};
 
 // ---------- Chat Completions ----------
+
+/// Chat Completions 工具定义：`{"type":"function","function":{...}}` 包装
+/// （与 Responses API 的平铺格式不同——标准 Chat Completions 要求 function 键）。
+fn tool_to_chat_function(t: &crate::model::ToolSchema) -> Value {
+    json!({
+        "type": "function",
+        "function": {
+            "name": t.name,
+            "description": t.description,
+            "parameters": t.input_schema,
+        }
+    })
+}
 
 /// OpenAI 兼容 Chat Completions 流式适配器（视觉模型 / Ollama 等兼容端）。
 pub struct ChatCompletionsModelService {
@@ -54,7 +67,7 @@ impl ChatCompletionsModelService {
             "stream": true,
         });
         if let Some(tools) = &request.tools {
-            body["tools"] = json!(tools.iter().map(tool_to_function).collect::<Vec<_>>());
+            body["tools"] = json!(tools.iter().map(tool_to_chat_function).collect::<Vec<_>>());
         }
         if let Some(effort) = &request.reasoning_effort {
             body["reasoning_effort"] = json!(effort);
