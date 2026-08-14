@@ -22,7 +22,9 @@ use std::time::Duration;
 
 use crate::agent::dispatch::Dispatch;
 use crate::agent::r#loop::{AgentLoop, DefaultAgentLoop};
-use crate::agent::session::{InterruptBus, SessionSwitch, StubSummarizer, Summarizer};
+use crate::agent::session::{
+    InterruptBus, SessionDecision, SessionSwitch, StubSummarizer, Summarizer,
+};
 use crate::audit::{AuditSink, Auditor, MemoryAuditSink};
 use crate::contract::PluginError;
 use crate::events::{EventSink, MemoryEventSink};
@@ -43,6 +45,9 @@ pub struct KernelBuilder {
     system_prompt: Option<Arc<dyn Fn() -> String + Send + Sync>>,
     summarizer: Option<Arc<dyn Summarizer>>,
     session_switch: Option<Arc<dyn SessionSwitch>>,
+    /// 会话调度决策器（ADR-0010 使用方实现）：注入后 send_user_message 改为
+    /// 前置决策（on_new_message 追加/分叉/切换）+ 回合末决策（on_turn_end）。
+    session_decision: Option<Arc<dyn SessionDecision>>,
     max_tool_calls: usize,
     max_consecutive_failures: usize,
     context_limit_tokens: usize,
@@ -77,6 +82,7 @@ impl KernelBuilder {
             system_prompt: None,
             summarizer: None,
             session_switch: None,
+            session_decision: None,
             max_tool_calls: 25,
             max_consecutive_failures: 3,
             context_limit_tokens: 131_072,
@@ -135,6 +141,14 @@ impl KernelBuilder {
     /// 缺省无切换能力（工具会返回"会话切换不可用"）。
     pub fn session_switch(mut self, s: Arc<dyn SessionSwitch>) -> Self {
         self.session_switch = Some(s);
+        self
+    }
+
+    /// 注入会话调度决策器（mistake-agent SessionScheduler 形态）：新消息前置决策
+    /// 与回合末决策。注入后 kernel 的 send_user_message* 委托决策器追加/分叉/切换，
+    /// 不再自行 append user 消息。
+    pub fn session_decision(mut self, d: Arc<dyn SessionDecision>) -> Self {
+        self.session_decision = Some(d);
         self
     }
 
@@ -294,6 +308,7 @@ impl KernelBuilder {
             self.turn_budget,
             self.rpc_extensions,
             Mutex::new(None),
+            self.session_decision,
         ))
     }
 }

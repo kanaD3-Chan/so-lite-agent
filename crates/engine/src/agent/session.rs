@@ -148,3 +148,24 @@ impl InterruptBus {
 pub trait SessionSwitch: Send + Sync {
     async fn switch(&self, goal: &str) -> Result<SessionKey, String>;
 }
+
+/// 会话调度决策（mistake-agent SessionScheduler 的 kernel 侧接口；上游 ADR-0010
+/// 决策与默认调度器由使用方实现）：新消息**前置决策**（先判断要不要切换上下文
+/// 再回答）+ 回合末决策（continue / update_goal / start_new）。注入后
+/// `Kernel::send_user_message*` 不再自行追加 user 消息，改由决策器返回进入回合
+/// 的会话 key 与消息链（决策器内部负责追加 / 树内分叉 / 切换与 active_path）。
+#[async_trait]
+pub trait SessionDecision: Send + Sync {
+    /// 新消息到达：返回 (进入回合的会话 key, 模型可见消息链)。
+    /// 实现方负责：空闲超时检查、主模型决策（start_new → 树内分叉挂摘要节点）、
+    /// user 消息落盘、set_active_path；决策失败默认继续当前会话（存疑即继续）。
+    async fn on_new_message(
+        &self,
+        key: SessionKey,
+        text: &str,
+        display_text: Option<String>,
+    ) -> Result<(SessionKey, Vec<Message>), String>;
+
+    /// 回合结束：会话调度决策（如 start_new → 只挂摘要节点，下条消息从子树继续）。
+    async fn on_turn_end(&self, key: &SessionKey, outcome: &[Message]) -> Result<(), String>;
+}

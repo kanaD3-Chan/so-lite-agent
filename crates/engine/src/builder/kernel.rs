@@ -7,7 +7,7 @@ use serde_json::{Value, json};
 
 use crate::agent::dispatch::Dispatch;
 use crate::agent::r#loop::{AgentLoop, LoopError, TurnInput, TurnOutcome};
-use crate::agent::session::{InterruptBus, SessionKey, SessionMeta};
+use crate::agent::session::{InterruptBus, SessionDecision, SessionKey, SessionMeta};
 use crate::audit::{AuditRecord, Auditor};
 use crate::contract::{CallerPolicy, ToolError, full_to_wire};
 use crate::events::EventSink;
@@ -37,6 +37,8 @@ pub struct Kernel {
     turn_budget: Duration,
     rpc_extensions: Vec<Arc<dyn RpcExtension>>,
     active: Mutex<Option<AbortSignal>>,
+    /// 会话调度决策器（使用方注入，ADR-0010）：新消息前置决策 + 回合末决策。
+    session_decision: Option<Arc<dyn SessionDecision>>,
 }
 
 impl Kernel {
@@ -53,6 +55,7 @@ impl Kernel {
         turn_budget: Duration,
         rpc_extensions: Vec<Arc<dyn RpcExtension>>,
         active: Mutex<Option<AbortSignal>>,
+        session_decision: Option<Arc<dyn SessionDecision>>,
     ) -> Self {
         Self {
             registry,
@@ -65,6 +68,7 @@ impl Kernel {
             turn_budget,
             rpc_extensions,
             active,
+            session_decision,
         }
     }
 
@@ -142,33 +146,48 @@ impl Kernel {
         attachments: Vec<Attachment>,
         forced_wire: Option<String>,
     ) -> Result<TurnOutcome, LoopError> {
-        if self
-            .store
-            .get_session(&key)
-            .await
-            .map_err(session_err)?
-            .is_none()
-        {
-            self.store
-                .create_session(&key, &SessionMeta::new(key))
-                .await
-                .map_err(session_err)?;
-        }
+        // 会话调度决策注入时：前置决策（新消息先判断要不要切换上下文，再追加/
+        // 分叉/切换），返回进入回合的会话 key 与消息链；否则默认 create + append。
+        let (effective_key, messages) = match &self.session_decision {
+            Some(decider) => {
+                let (k, msgs) = decider
+                    .on_new_message(key, text, display_text)
+                    .await
+                    .map_err(|e| LoopError::Internal(format!("会话调度决策失败：{e}")))?;
+                (k, msgs)
+            }
+            None => {
+                if self
+                    .store
+                    .get_session(&key)
+                    .await
+                    .map_err(session_err)?
+                    .is_none()
+                {
+                    self.store
+                        .create_session(&key, &SessionMeta::new(key))
+                        .await
+                        .map_err(session_err)?;
+                }
 
-        let mut user_msg = Message::user_with_display(text, display_text);
-        if let MessageKind::User {
-            attachments: atts, ..
-        } = &mut user_msg.kind
-        {
-            *atts = attachments;
-        }
-        self.store
-            .append_event(&key, SessionEvent::new(user_msg, SurfaceOp::Append))
-            .await
-            .map_err(session_err)?;
+                let mut user_msg = Message::user_with_display(text, display_text);
+                if let MessageKind::User {
+                    attachments: atts, ..
+                } = &mut user_msg.kind
+                {
+                    *atts = attachments;
+                }
+                self.store
+                    .append_event(&key, SessionEvent::new(user_msg, SurfaceOp::Append))
+                    .await
+                    .map_err(session_err)?;
 
-        // 模型可见消息 = 活跃链投影（含刚追加的 user 消息）。
-        let messages = self.store.read_path(&key).await.map_err(session_err)?;
+                // 模型可见消息 = 活跃链投影（含刚追加的 user 消息）。
+                let messages = self.store.read_path(&key).await.map_err(session_err)?;
+                (key, messages)
+            }
+        };
+
         let tools = self.registry.model_tools();
         let signal = AbortSignal::new();
         *self.active.lock().expect("active poisoned") = Some(signal.clone());
@@ -195,13 +214,17 @@ impl Kernel {
                 _ => SurfaceOp::Append,
             };
             self.store
-                .append_event(&key, SessionEvent::new(msg.clone(), op))
+                .append_event(&effective_key, SessionEvent::new(msg.clone(), op))
                 .await
                 .map_err(session_err)?;
         }
         if let Some(info) = &outcome.compaction {
             // 压缩 = 追加 summary 事件，replace 遮蔽被压段（ADR-0007）。
-            let events = self.store.read_events(&key).await.map_err(session_err)?;
+            let events = self
+                .store
+                .read_events(&effective_key)
+                .await
+                .map_err(session_err)?;
             let fold = fold_surface(&events).map_err(session_err)?;
             let id_to_seq: std::collections::HashMap<MessageId, u64> =
                 events.iter().map(|e| (e.message.id, e.seq)).collect();
@@ -220,24 +243,32 @@ impl Kernel {
                     SessionEvent::new(info.summary.clone(), SurfaceOp::Replace { start, end });
                 summary_event.source_event_seqs = compacted.to_vec();
                 self.store
-                    .append_event(&key, summary_event)
+                    .append_event(&effective_key, summary_event)
                     .await
                     .map_err(session_err)?;
                 // 活跃末端 = 保留段末端（压缩后链 = [摘要, 保留段…]）。
                 self.store
-                    .set_active_path(&key, Some(info.tail_end))
+                    .set_active_path(&effective_key, Some(info.tail_end))
                     .await
                     .map_err(session_err)?;
             }
-            self.events
-                .emit(crate::events::Event::Compaction { session: key });
+            self.events.emit(crate::events::Event::Compaction {
+                session: effective_key,
+            });
             self.auditor.record(AuditRecord::Compaction {
-                session: key.to_string(),
+                session: effective_key.to_string(),
                 summarized: info.summarized,
             });
         }
+        // 回合末会话调度决策（continue / update_goal / start_new，失败静默降级
+        // continue——存疑即继续，mistake-agent ADR-0030）。
+        if let Some(decider) = &self.session_decision
+            && let Err(e) = decider.on_turn_end(&effective_key, &outcome.messages).await
+        {
+            log::warn!("回合末会话调度决策失败，忽略：{e}");
+        }
         self.store
-            .set_last_activity(&key, chrono::Utc::now())
+            .set_last_activity(&effective_key, chrono::Utc::now())
             .await
             .map_err(session_err)?;
         self.auditor.record(AuditRecord::Lifecycle {
