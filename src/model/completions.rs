@@ -144,7 +144,7 @@ impl ModelService for ChatCompletionsModelService {
                             if ev.name == "data" || ev.name.is_empty() {
                                 let data = ev.data.trim();
                                 if data == "[DONE]" {
-                                    for (index, (call_id, name, _args)) in calls.iter() {
+                                    for (index, (call_id, name, args)) in calls.iter() {
                                         let _ = tx
                                             .send(Ok(ModelChunk::ToolCallStart {
                                                 index: *index,
@@ -155,7 +155,8 @@ impl ModelService for ChatCompletionsModelService {
                                         let _ = tx
                                             .send(Ok(ModelChunk::ToolCallDelta {
                                                 index: *index,
-                                                data: String::new(),
+                                                // 修复：发送拼接好的 arguments（此前误发空串导致工具参数丢失）
+                                                data: args.clone(),
                                             }))
                                             .await;
                                         let _ = tx
