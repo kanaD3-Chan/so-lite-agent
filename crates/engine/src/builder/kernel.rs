@@ -559,9 +559,10 @@ impl Kernel {
         self.store.read_all(key).await.map_err(session_err)
     }
 
-    /// 模型可见工具列表（wire name）。
+    /// 用户可见工具列表（wire name；GUI 工具目录数据源，mistake-agent 同款：
+    /// 只含 user_visible=true，session::switch 等仅模型工具不出现）。
     pub fn list_tools(&self) -> Vec<ToolSchema> {
-        self.registry.model_tools()
+        self.registry.user_tools()
     }
 
     /// 用户触发入口（等价 trigger_command）：找不到 Command 时回退同名 Tool。

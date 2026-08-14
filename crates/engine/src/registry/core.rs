@@ -375,6 +375,29 @@ impl Registry {
         out
     }
 
+    /// 用户可见工具列表（GUI 工具目录，list_tools 数据源）：UserAndModel **且
+    /// user_visible=true**——`user_visible=false` 的工具（如 session::switch，
+    /// 仅模型可调）不出现在用户工具栏（mistake-agent 同款：list_tools 只返回
+    /// user_visible=true 的入口点）。模型工具列表仍用 [`Self::model_tools`]。
+    pub fn user_tools(&self) -> Vec<ToolSchema> {
+        let entries = self.entries.read().expect("registry poisoned");
+        let mut out = Vec::new();
+        for e in entries.values() {
+            for t in &e.info.tools {
+                if t.policy == CallerPolicy::UserAndModel && t.user_visible {
+                    out.push(ToolSchema {
+                        name: full_to_wire(&full_name(&e.info.namespace, &t.name)),
+                        description: t.description.clone(),
+                        input_schema: serde_json::to_value(&t.params).unwrap_or_default(),
+                        title: t.title.clone(),
+                        icon: t.icon.clone(),
+                    });
+                }
+            }
+        }
+        out
+    }
+
     pub fn namespaces(&self) -> Vec<String> {
         self.entries
             .read()
