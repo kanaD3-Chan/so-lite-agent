@@ -173,7 +173,7 @@ impl DynamicService for MyNotesService {
 
   ```rust
   let loader = Arc::new(ScriptPluginLoader::new(
-      plugins_dir, kernel.registry().clone(), services, events, logger,
+      plugins_dir, kernel.registry_arc(), services, events, logger,
   ));
   loader.load_all()?;                       // 首次全量加载
   tokio::spawn(loader.clone().run_loop(Duration::from_secs(1)));  // 后台轮询

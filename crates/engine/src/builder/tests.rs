@@ -477,3 +477,18 @@ async fn hooks_observe_after_tool_and_turn_stopping() {
     );
     assert!(outcome.tool_calls >= 1);
 }
+
+#[tokio::test]
+async fn registry_arc_shares_kernel_registry() {
+    // registry_arc() 返回与 kernel 内部**同一**注册表实例的 Arc：外部装配
+    // （ScriptPluginLoader 热插拔加载器等）据此向运行中 kernel 注册/查询条目。
+    let kernel = kernel_with_hooks(vec![]).await;
+    let registry = kernel.registry_arc();
+    assert!(
+        registry.namespaces().iter().any(|n| n == "demo"),
+        "registry_arc 应能看到 kernel 已注册的 namespace，实际：{:?}",
+        registry.namespaces()
+    );
+    // 同一实例（Arc 内层地址 == &Registry 视图地址）。
+    assert!(std::ptr::eq(&*registry, kernel.registry()));
+}

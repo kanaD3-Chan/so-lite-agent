@@ -72,6 +72,14 @@ impl Kernel {
         &self.registry
     }
 
+    /// 注册表 Arc 句柄：外部装配（`ScriptPluginLoader` 热插拔加载器等）需要与
+    /// kernel 共享**同一**注册表实例，`&Registry` 不足以构造持有型句柄。
+    /// （plugin-dev.md 的 `kernel.registry().clone()` 示例依赖 Registry: Clone，
+    /// 实际不存在——本方法才是正解。）
+    pub fn registry_arc(&self) -> Arc<Registry> {
+        self.registry.clone()
+    }
+
     pub fn dispatch(&self) -> &Dispatch {
         &self.dispatch
     }
