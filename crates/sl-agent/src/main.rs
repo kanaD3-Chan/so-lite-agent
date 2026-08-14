@@ -4,19 +4,18 @@
 //! 前端是独立 React 工程（`frontend/`），自己起 dev server 或静态托管，经 WS 连本服务。
 //! 模型默认 mock（零配置 hello 回合），经环境变量接真实 OpenAI 兼容端点；
 //! Rune 脚本用户插件从 `--plugins` 目录加载（一插件一目录：manifest.json + plugin.rn）。
+//! 内置内核插件（crates/plugin-*，ADR-0008）由 build.rs 自动发现并逐条注册。
 //!
-//! 运行：`cargo run --bin sl-agent --features server,rune-plugins`
+//! 运行：`cargo run -p sl-agent`
 //!
 //! 环境变量：`SL_AGENT_PORT`（默认 8080）、`SL_AGENT_PLUGINS_DIR`（默认 `./plugins`）、
 //! `SL_AGENT_API_URL` / `SL_AGENT_API_KEY` / `SL_AGENT_MODEL`（可选，配了接真实模型）。
 //! 前端连 `ws://127.0.0.1:8080/ws`（Vite dev 见 `frontend/README`）。
 
-#![cfg(feature = "server")]
-
+mod builtin;
 mod ws;
 
 use std::net::SocketAddr;
-#[cfg(feature = "rune-plugins")]
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
@@ -69,8 +68,8 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
     let session_handle: std::sync::Arc<dyn so_lite_agent::services::SessionStore> = session_store;
     builder =
         builder.service_handles(ServiceHandles::default().with_session(session_handle.clone()));
-    // 内核插件注册（Linus 模式，ADR-0036 构建期自动发现清单）。
-    for desc in so_lite_agent::plugin::builtin_kernel_plugins() {
+    // 内核插件注册（Linus 模式，ADR-0036 构建期自动发现 crates/plugin-*）。
+    for desc in builtin::builtin_kernel_plugins() {
         builder = builder.register_kernel_plugin(desc);
     }
 
@@ -100,7 +99,6 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     // ---- Rune 脚本用户插件目录（一插件一目录，失败只告警单个插件）----
-    #[cfg(feature = "rune-plugins")]
     {
         let plugins_dir =
             std::env::var("SL_AGENT_PLUGINS_DIR").unwrap_or_else(|_| "./plugins".into());

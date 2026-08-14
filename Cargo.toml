@@ -1,49 +1,39 @@
-[package]
-name = "so-lite-agent"
+# SL Agent workspace（ADR-0008）：引擎 + 内核插件 crate + 官方二进制，最终编译成一个二进制。
+#
+# - crates/engine        引擎 crate（so-lite-agent，业务无关的通用运行时，内部依赖不发布）
+# - crates/plugin-*      内核插件 crate（Linus 模式：仅维护者编译进官方二进制）
+# - crates/sl-agent      官方二进制（sl-agent，API 服务，依赖引擎 + 全部内置插件）
+#
+# 新增内核插件：新建 crates/plugin-<name>/（参考 docs/plugin-dev/reference/），
+# 在 members 列表加一行 + 在 crates/sl-agent/Cargo.toml 的 [dependencies] 加一行；
+# 注册装配由 crates/sl-agent/build.rs 自动发现（ADR-0036 改造），无需改任何 Rust 代码。
+
+[workspace]
+members = ["crates/engine", "crates/sl-agent", "crates/plugin-storage"]
+resolver = "3"
+
+[workspace.package]
 version = "0.1.0"
 edition = "2024"
-description = "开箱即用的通用 Agent 运行时：agent loop、工具注册与调度、会话、模型 Provider 抽象"
 license = "AGPL-3.0-only"
-keywords = ["agent", "llm", "session", "tools", "async"]
-categories = ["asynchronous", "api-bindings"]
 
-[dependencies]
+# 依赖版本单一来源（各 crate 用 `dep = { workspace = true }` 引用）。
+[workspace.dependencies]
 async-trait = "0.1.91"
-axum = { version = "0.8.9", optional = true, features = ["ws"] }
+axum = { version = "0.8.9", features = ["ws"] }
 chrono = { version = "0.4.45", features = ["serde"] }
 futures-util = "0.3.33"
 jsonschema = "0.49.3"
 log = "0.4.33"
 reqwest = { version = "0.13.4", default-features = false, features = ["json", "rustls", "stream"] }
-rune = { version = "0.14.2", optional = true }
+rune = "0.14.2"
 schemars = "1.2.2"
 serde = { version = "1.0.229", features = ["derive"] }
 serde_json = "1.0.151"
+tempfile = "3.20.0"
 thiserror = "2.0.19"
 tokio = { version = "1.53.1", features = ["rt-multi-thread", "macros", "sync", "time"] }
 tokio-stream = { version = "0.1.19", features = ["sync"] }
+tokio-tungstenite = "0.30.0"
 tokio-util = { version = "0.7.19" }
 uuid = { version = "1.24.0", features = ["v4", "serde"] }
-
-[dev-dependencies]
-tempfile = "3.20.0"
-tokio-tungstenite = "0.30.0"
-
-[features]
-default = []
-# Rune 脚本用户插件路径（ADR-0006）：eBPF 模型（安全 VM + requires 宿主函数白名单）。
-# 默认关闭——库消费者不背 rune 编译成本；`sl-agent` 二进制启用。
-# 启用：cargo add so-lite-agent --features rune-plugins
-rune-plugins = ["dep:rune"]
-# sl-agent API 服务端（HTTP/WS，前后端分离 ADR-0010；前端独立部署）：挂在二进制侧，不进 crate 引擎公共面（ADR-0006）。
-server = ["dep:axum", "tokio/net", "tokio/io-util"]
-
-[[bin]]
-name = "sl-agent"
-path = "src/bin/sl-agent/main.rs"
-required-features = ["server"]
-
-[[example]]
-name = "script_plugin"
-path = "examples/script_plugin.rs"
-required-features = ["rune-plugins"]

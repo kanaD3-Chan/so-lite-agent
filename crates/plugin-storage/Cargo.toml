@@ -1,0 +1,13 @@
+# 内核插件 crate：storage（JSONL 会话事实日志，ADR-0007 第二步）。
+# Linus 模式（ADR-0006/0008）：仅维护者编译进官方二进制；crate 边界即信任边界，
+# 本 crate 可自带依赖（不回流引擎）。注册装配由 sl-agent 的 build.rs 自动发现。
+
+[package]
+name = "sl-plugin-storage"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "SL Agent 内核插件：JSONL 会话事实日志（storage 服务提供者）"
+
+[dependencies]
+so-lite-agent = { path = "../engine" }

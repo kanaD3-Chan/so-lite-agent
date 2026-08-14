@@ -1,0 +1,26 @@
+# sl-agent 官方二进制（ADR-0006/0008/0010）：业务无关的通用 Agent API 服务。
+# 依赖引擎 crate + 全部内置内核插件 crate；build.rs 自动发现 crates/plugin-*/
+# 生成内置插件注册清单（ADR-0036 改造），新增插件不改任何 Rust 装配代码。
+
+[package]
+name = "sl-agent"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "SL Agent 官方二进制：通用 Agent API 服务（HTTP/WS，前后端分离 ADR-0010）"
+
+[dependencies]
+# 引擎（always 启用 Rune 脚本用户插件路径——官方二进制形态）。
+so-lite-agent = { path = "../engine", features = ["rune-plugins"] }
+# 内置内核插件（Linus 模式，ADR-0008）：新增插件 = 这里加一行依赖（注册自动发现）。
+sl-plugin-storage = { path = "../plugin-storage" }
+axum = { workspace = true }
+futures-util = { workspace = true }
+log = { workspace = true }
+serde_json = { workspace = true }
+tokio = { workspace = true, features = ["net", "io-util"] }
+tokio-stream = { workspace = true }
+
+[dev-dependencies]
+reqwest = { workspace = true }
+tokio-tungstenite = { workspace = true }

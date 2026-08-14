@@ -1,0 +1,44 @@
+# 引擎 crate（so-lite-agent）：业务无关的通用 Agent 运行时（ADR-0004）。
+# workspace 内部依赖，不发布 crates.io（ADR-0009）；fork 定制者以本 crate 为底座
+# 编写自己的内核插件 crate 与二进制。
+
+[package]
+name = "so-lite-agent"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "业务无关的通用 Agent 运行时：agent loop、工具注册与调度、会话、模型 Provider 抽象"
+keywords = ["agent", "llm", "session", "tools", "async"]
+categories = ["asynchronous", "api-bindings"]
+
+[dependencies]
+async-trait = { workspace = true }
+chrono = { workspace = true }
+futures-util = { workspace = true }
+jsonschema = { workspace = true }
+log = { workspace = true }
+reqwest = { workspace = true }
+rune = { workspace = true, optional = true }
+schemars = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+tokio = { workspace = true }
+tokio-stream = { workspace = true }
+tokio-util = { workspace = true }
+uuid = { workspace = true }
+
+[dev-dependencies]
+tempfile = { workspace = true }
+
+[features]
+default = []
+# Rune 脚本用户插件路径（ADR-0006）：eBPF 模型（安全 VM + requires 宿主函数白名单）。
+# 默认关闭——库消费者不背 rune 编译成本；`sl-agent` 二进制启用。
+# 启用：cargo add so-lite-agent --features rune-plugins
+rune-plugins = ["dep:rune"]
+
+[[example]]
+name = "script_plugin"
+path = "examples/script_plugin.rs"
+required-features = ["rune-plugins"]

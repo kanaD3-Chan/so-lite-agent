@@ -21,7 +21,7 @@
 
 ```bash
 # 终端 1：sl-agent API 服务（前后端分离 ADR-0010）
-cargo run --bin sl-agent --features server,rune-plugins
+cargo run -p sl-agent
 # API 在 http://127.0.0.1:8080（/ws + /healthz；默认 mock 模型，零配置 hello 回合）
 
 # 终端 2：官方参考前端（React）
@@ -33,7 +33,7 @@ cd frontend && npm install && npm run dev
 
 ```bash
 SL_AGENT_API_URL=https://api.deepseek.com SL_AGENT_API_KEY=xxx SL_AGENT_MODEL=deepseek-chat \
-  SL_AGENT_DATA_DIR=./data cargo run --bin sl-agent --features server,rune-plugins
+  SL_AGENT_DATA_DIR=./data cargo run -p sl-agent
 ```
 
 环境变量：`SL_AGENT_PORT`（默认 8080）、`SL_AGENT_PLUGINS_DIR`（默认 `./plugins`）、
@@ -96,7 +96,7 @@ async fn handle_remind(params) {
 ### 3. 验证
 
 ```bash
-cargo run --example script_plugin --features rune-plugins
+cargo run -p so-lite-agent --example script_plugin --features rune-plugins
 # 或浏览器里对模型说"调用 notes::remind"
 ```
 
@@ -110,7 +110,7 @@ cargo run --example script_plugin --features rune-plugins
 git clone <你的 fork>
 cd so-lite-agent
 cargo test --all-targets --all-features      # 门禁
-cargo run --bin sl-agent --features server,rune-plugins
+cargo run -p sl-agent
 ```
 
 ### 2. 加一个业务服务（使用方自己的服务实例）
@@ -123,7 +123,7 @@ pub trait NoteService: Send + Sync {
     async fn save(&self, content: &str) -> Result<u64, String>;
     async fn count(&self) -> Result<usize, String>;
 }
-// MemoryNoteService 实现略（见 examples/plugins.rs）
+// MemoryNoteService 实现略（见 crates/engine/examples/plugins.rs）
 
 let handles = ServiceHandles::default()
     .with_custom(ServiceId::custom("notes"), Arc::new(MemoryNoteService::default()));
@@ -146,19 +146,20 @@ impl UserPlugin for StudyPlugin {
     fn register(ctx: PluginContext<'_>) -> Result<(), PluginError> {
         let notes = ctx.handles.get_custom::<MemoryNoteService>(&ServiceId::custom("notes"))
             .expect("requires 已校验，服务必然注入");
-        ctx.registrar.tool("remind", /* 绑定 handler，见 examples/plugins.rs */)
+        ctx.registrar.tool("remind", /* 绑定 handler，见 crates/engine/examples/plugins.rs */)
     }
 }
 ```
 
-完整可运行：`examples/plugins.rs`（自定义服务 + 内核插件 + 用户插件端到端）。
+完整可运行：`crates/engine/examples/plugins.rs`（自定义服务 + 内核插件 + 用户插件端到端）。
 
-### 4. 写内核插件（信任边界内，Linus 模式）
+### 4. 写内核插件（信任边界内，Linus 模式，独立 crate）
 
-内核插件放 `src/plugin/<name>/`，build.rs 自动发现（ADR-0036），无需改聚合文件：
+内核插件 = workspace 独立 crate：`crates/plugin-<name>/`（ADR-0008），注册装配由
+`sl-agent` 的 build.rs 自动发现（ADR-0036 改造），无需改任何 Rust 装配代码：
 
 ```rust
-// src/plugin/mything/mod.rs
+// crates/plugin-mything/src/lib.rs
 pub struct MyThingPlugin;
 impl KernelPlugin for MyThingPlugin {
     fn info() -> Info {
@@ -178,9 +179,12 @@ impl KernelPlugin for MyThingPlugin {
 pub fn descriptor() -> KernelDescriptor { KernelDescriptor::from_plugin::<MyThingPlugin>() }
 ```
 
-- 新增插件 = 复制 `docs/plugin-dev/reference/kernel_plugin.rs` 到
-  `src/plugin/<你的插件名>/`；目录根放空文件 `disabled` 可整目录禁用；
-- `sl-agent` 装配时逐条注册 `builtin_kernel_plugins()`（`src/bin/sl-agent/main.rs`）。
+- 新增插件 = 复制 `docs/plugin-dev/reference/kernel_plugin.rs` 为
+  `crates/plugin-<你的插件名>/src/lib.rs`，Cargo.toml 依赖引擎 `so-lite-agent`；
+  再在**根 Cargo.toml**（`[workspace].members`）与 **crates/sl-agent/Cargo.toml**
+  （`[dependencies]`）各加一行；插件目录根放空文件 `disabled` 可跳过注册；
+- `sl-agent` 装配时逐条注册 `builtin_kernel_plugins()`（生成于 `crates/sl-agent/src/builtin.rs`，
+  build.rs 自动发现 crates/plugin-*）。
 
 ### 5. 装配并跑
 
@@ -251,4 +255,4 @@ cargo fmt --check
 | 接自己的模型 / 改系统提示 / 换会话存储 | A：环境变量 + 配置 | 本文档「共同部分」 |
 | 新内核能力（特权入口、新服务提供者） | B：内核插件 | docs/kernel-dev.md §4.4 |
 | 换 agent loop / 深度集成 | B：fork 改装配 | docs/kernel-dev.md §8 |
-| 完整示例 | — | examples/hello.rs、examples/plugins.rs、examples/script_plugin.rs |
+| 完整示例 | — | crates/engine/examples/hello.rs、plugins.rs、script_plugin.rs |

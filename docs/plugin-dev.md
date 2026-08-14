@@ -3,7 +3,7 @@
 > **从这里开始，不需要理解内核设计**：fork 定制者在源码内按本文写插件即可
 > （Rune 脚本用户插件 / Rust 内核插件；从零开发自己的 Agent 先读
 > [agent-dev-guide.md](agent-dev-guide.md)）。
-> 完整可运行示例：[examples/plugins.rs](../examples/plugins.rs)。
+> 完整可运行示例：[crates/engine/examples/plugins.rs](../crates/engine/examples/plugins.rs)。
 > 内核实现细节见 [kernel-dev.md](kernel-dev.md)，接口参考见 [api.md](api.md)。
 
 ## 心智模型
@@ -39,7 +39,7 @@ KernelBuilder::new().register_kernel_plugin(desc);
 - **加载时**（默认懒加载，首次命中入口点才执行）：调用 `register(ctx)` 绑定 handler；`info().load = LoadPolicy::Eager` 可改为注册时立即绑定。
 - **enabled 标记**：`Info.enabled` 缺省 **false**——插件未启用时注册表静默跳过（保留在聚合点无害）；显式 `enabled: true` 才注册。
 
-**为什么不用宏/自动发现**：**用户插件**注册保持**显式链式调用**（`register_plugin` 各一行），延续 mistake-agent 的显式装配设计。曾评估过属性宏 + 一次聚合与 `inventory`/`linkme` 链接期自动收集（引入隐式全局注册表、平台坑，破坏 build 时 fail-fast 的可预期性）——均被否。**内核插件例外**（ADR-0036）：内核插件放 `src/plugin/<name>/`，build.rs 构建期自动发现生成 `builtin_kernel_plugins()` 清单，`sl-agent` 装配时逐条注册——因为内核插件由维护者编译进官方二进制（Linus 模式），目录即插件的编排收益明确（新增插件零样板）。
+**为什么不用宏/自动发现**：**用户插件**注册保持**显式链式调用**（`register_plugin` 各一行），延续 mistake-agent 的显式装配设计。曾评估过属性宏 + 一次聚合与 `inventory`/`linkme` 链接期自动收集（引入隐式全局注册表、平台坑，破坏 build 时 fail-fast 的可预期性）——均被否。**内核插件例外**（ADR-0036 改造）：内核插件是 workspace 独立 crate（`crates/plugin-<name>/`，ADR-0008），`sl-agent` 二进制的 build.rs 构建期扫描 `crates/plugin-*/` 生成 `builtin_kernel_plugins()` 清单、装配时逐条注册——因为内核插件由维护者编译进官方二进制（Linus 模式），crate 即插件的编排收益明确（新增插件只改清单，注册装配零样板）。
 
 用户插件与内核插件对照：
 
@@ -160,7 +160,7 @@ impl DynamicService for MyNotesService {
 // 注入：ServiceHandles::default().with_dynamic(ServiceId::custom("notes"), Arc::new(svc))
 ```
 
-示例见 [examples/script_plugin.rs](../examples/script_plugin.rs)（加载仓库内 `plugins/demo/`）。
+示例见 [crates/engine/examples/script_plugin.rs](../crates/engine/examples/script_plugin.rs)（加载仓库根 `plugins/demo/`）。
 
 ### 热重载与执行超时（P2，不可信插件防护）
 
@@ -234,9 +234,14 @@ pub mod study;
 
 禁用语义在描述符里：**`enabled` 缺省 false，显式 `enabled: true` 才注册**；聚合点可以保留所有插件的注册行，未启用的会被注册表静默跳过（不需要 `disabled` 标记文件——那是 mistake-agent 编译期 include! 聚合的配套）。
 
-完整可运行示例：[examples/folder_plugins](../examples/folder_plugins/main.rs)（study/ 用户插件 + kernel_notes/ 内核插件 + 共享 notes.rs）。
+完整可运行示例：[crates/engine/examples/folder_plugins](../crates/engine/examples/folder_plugins/main.rs)（study/ 用户插件 + kernel_notes/ 内核插件 + 共享 notes.rs）。
 
 ## 内核插件（特权入口）
+
+> 内核插件 = workspace 独立 crate（`crates/plugin-<name>/`，ADR-0008）：注册装配由
+> `sl-agent` 的 build.rs 自动发现（ADR-0036 改造），无需改任何 Rust 代码；新增插件
+> 步骤见 [kernel-dev.md §4.4](kernel-dev.md)。下面的 Rust 片段是插件 crate 的
+> `src/lib.rs` 骨架（参考模板 `docs/plugin-dev/reference/kernel_plugin.rs`）。
 
 内核插件在信任边界内：register 拿到**全量**句柄，可注册需要特权的入口（如记忆路由、验算、会话切换）。
 

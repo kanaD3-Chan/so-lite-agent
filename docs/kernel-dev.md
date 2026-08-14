@@ -51,55 +51,77 @@ pivot（ADR-0006）后，可替换能力形式化为三角角色——**换 Prov
 
 ## 3. 模块地图
 
+workspace 形态（ADR-0008，最终编译成一个二进制 `sl-agent`）：
+
 ```text
-src/
-├── lib.rs                    crate 出口与模块声明
-├── builder/
+so-lite-agent/
+├── Cargo.toml                [workspace] members + [workspace.dependencies]
+├── crates/
+│   ├── engine/               so-lite-agent 引擎（业务无关的通用运行时，ADR-0004）
+│   │   ├── Cargo.toml        feature `rune-plugins`（默认关，官方二进制启用）
+│   │   ├── examples/         hello / plugins / folder_plugins / script_plugin
+│   │   ├── tests/            hello_round / rpc_round / script_plugin / live_api
+│   │   └── src/              （引擎模块树见下）
+│   ├── plugin-storage/       sl-plugin-storage 内核插件 crate：JSONL 会话事实日志
+│   │   └── src/lib.rs         （storage 服务提供者，ADR-0007 第二步）
+│   └── sl-agent/             sl-agent 官方二进制（ADR-0006/0010）
+│       ├── build.rs          内核插件自动发现：扫 crates/plugin-*/（ADR-0036 改造）
+│       ├── Cargo.toml        依赖引擎 + 全部内置插件 crate（新增插件 = 加一行）
+│       └── src/
+│           ├── main.rs       HTTP 装配（/ws + /healthz，前后端分离 ADR-0010）
+│           ├── builtin.rs    生成的内置插件清单（include! OUT_DIR）
+│           └── ws.rs         WS/RPC 桥 + 事件广播（单一有序路径）
+└── frontend/                 独立前端（React+TS，ADR-0010）：WS 连 sl-agent
+```
+
+引擎模块树（`crates/engine/src/`）：
+
+```text
+lib.rs                    crate 出口与模块声明（extern crate self 供参考模板锚定）
+builder/
 │   ├── mod.rs                KernelBuilder / Kernel 公共面（pub use 重导出）
 │   ├── assembly.rs           KernelBuilder（默认服务自动补齐、插件注册 fail-fast）
 │   └── kernel.rs             Kernel 直连 API + 通用 RPC 入口
-├── contract.rs               Info/EntryPoint/CallerPolicy/LoadPolicy/ToolError/PluginError
-├── context.rs                PluginContext/KernelContext/EntryRegistrar
-├── registry/
+contract.rs               Info/EntryPoint/CallerPolicy/LoadPolicy/ToolError/PluginError
+context.rs                PluginContext/KernelContext/EntryRegistrar
+registry/
 │   ├── mod.rs                注册表公共面（pub use 重导出）
 │   ├── plugin.rs             UserPlugin/KernelPlugin/PluginDescriptor/RegisteredEntry
 │   └── core.rs               注册表：fail-fast 校验、懒注册、模型工具列表过滤
-├── services/
+services/
 │   ├── mod.rs                服务契约公共面（pub use 重导出）
 │   ├── handles.rs            ServiceId + ServiceHandles（类型化容器）
-│   └── session.rs            SessionStore 契约 + InMemorySessionStore + 活跃路径
-├── events.rs                 Event 事件流（通用子集 + Custom 扩展口）
-├── audit.rs                  AuditRecord/Auditor/AuditSink
-├── message.rs                Message/MessageKind/MessageId/消息树辅助
-├── logger.rs                 分级日志门面 + 敏感值脱敏
-├── rpc.rs                    通用 RPC（RpcRequest/RpcFrame/Method/RpcExtension）
-├── agent/
+│   ├── session.rs            SessionStore 契约 + InMemorySessionStore + 活跃路径
+│   └── jsonl.rs              JsonlSessionStore（JSONL 事件日志落盘，ADR-0007 第二步）
+events.rs                 Event 事件流（通用子集 + Custom 扩展口）
+audit.rs                  AuditRecord/Auditor/AuditSink
+message.rs                Message/MessageKind/MessageId/消息树辅助
+logger.rs                 分级日志门面 + 敏感值脱敏
+rpc.rs                    通用 RPC（RpcRequest/RpcFrame/Method/RpcExtension）
+agent/
 │   ├── dispatch.rs           统一工具/命令执行（策略、校验、超时、审计）
 │   ├── loop/
 │   │   ├── mod.rs            Agent loop 公共面（pub use 重导出）
 │   │   ├── types.rs          TurnInput/TurnOutcome/StopReason/CompactionInfo/LoopError
+│   │   ├── hooks.rs          LoopHook 决策链（before_tool 改写/拒绝，P2）
 │   │   └── engine.rs         AgentLoop（护栏、压缩、中断消费、session::switch）
 │   └── session.rs            SessionKey/Goal/InterruptBus/Summarizer/SessionSwitch
-└── model/
-    ├── mod.rs                模型层公共面（pub use 重导出）
-    ├── contract.rs           ModelService/ModelRequest/ModelChunk/ModelError
-    ├── handle.rs             AbortSignal + ModelHandle（超时/abort/审计）
-    ├── providers.rs          ProviderRegistry + register_provider
-    ├── mock.rs               MockModelService（链路自检/测试）
-    ├── openai.rs             OpenAI 兼容共享工具 + register_openai_compatible()
-    ├── responses.rs          Responses API 流式适配器
-    ├── completions.rs        Chat Completions 流式适配器
-    └── anthropic.rs          Anthropic Messages API 流式适配器
-
-feature 门控（默认关，二进制启用）：
-├── rune/                    Rune 脚本用户插件（ADR-0006，feature `rune-plugins`）
+model/
+│   ├── mod.rs                模型层公共面（pub use 重导出）
+│   ├── contract.rs           ModelService/ModelRequest/ModelChunk/ModelError
+│   ├── handle.rs             AbortSignal + ModelHandle（超时/abort/审计）
+│   ├── providers.rs          ProviderRegistry + register_provider
+│   ├── mock.rs               MockModelService（链路自检/测试）
+│   ├── openai.rs             OpenAI 兼容共享工具 + register_openai_compatible()
+│   ├── responses.rs          Responses API 流式适配器
+│   ├── completions.rs        Chat Completions 流式适配器
+│   └── anthropic.rs          Anthropic Messages API 流式适配器
+rune/                     Rune 脚本用户插件（ADR-0006，feature `rune-plugins`，默认关）
 │   ├── vm.rs                ScriptVm（一次编译、按调用新建 Vm、async 调用桥）
 │   ├── host.rs              宿主函数安装骨架（动态闭包，Send 约束）
-│   └── plugin.rs            插件桥：manifest 声明 + register 绑定 + requires 白名单
-│                            （每插件一条专用执行线程：rune Value !Send × dispatch Send）
-├── src/bin/sl-agent/        服务端（feature `server`）：main.rs（HTTP/装配）
-│                             + ws.rs（WS/RPC 桥 + 事件广播，单一有序路径）
-└── frontend/                独立前端（React+TS，ADR-0010 前后端分离）：WS 连 sl-agent
+│   ├── plugin.rs            插件桥：manifest 声明 + register 绑定 + requires 白名单
+│   │                        （每插件一条专用执行线程：rune Value !Send × dispatch Send）
+│   └── loader.rs            ScriptPluginLoader（目录轮询热重载 + 失败回滚 + 执行超时，P2）
 ```
 
 `mod.rs` 只负责公共面、装配和 `pub use` 重导出；职责实现放子模块（如
@@ -108,7 +130,7 @@ feature 门控（默认关，二进制启用）：
 
 ## 4. 启动装配顺序
 
-入口是 `KernelBuilder::build()`（`src/builder/assembly.rs`）。顺序不能随意交换，因为组件之间存在依赖：
+入口是 `KernelBuilder::build()`（`crates/engine/src/builder/assembly.rs`）。顺序不能随意交换，因为组件之间存在依赖：
 
 1. 补齐默认值：事件 sink = `MemoryEventSink`、审计 sink = `MemoryAuditSink`、
    system_prompt = 空串 provider、摘要器 = `StubSummarizer`、会话切换 = 无（ADR-0003）；
@@ -161,17 +183,21 @@ KernelBuilder::new().register_plugin(desc);
 - `PluginContext.handles`：只含 `requires` 声明过的服务（结构性受限，无运行时检查可绕）；
 - `KernelContext.handles`：全量句柄（内核插件在信任边界内，是服务的提供者）。
 
-### 4.4 内核插件目录（Linus 模式，ADR-0036）
+### 4.4 内核插件 crate（Linus 模式，ADR-0036 改造 / ADR-0008）
 
-内核插件放在 `src/plugin/<name>/`（目录即插件，小写蛇形，`mod.rs` 为入口），
-**build.rs 自动发现**：构建期扫描目录生成 `builtin_kernel_plugins()` 清单，
-`sl-agent` 二进制装配时逐条注册（新增插件无需改任何聚合文件；目录根放空文件
-`disabled` 可整目录跳过）。首个内置插件 `storage`（纯服务提供者：JSONL 会话
-事实日志落盘，ADR-0007 第二步）。参考模板：`docs/plugin-dev/reference/kernel_plugin.rs`
-（复制到 `src/plugin/<你的插件名>/` 即开工）。
+内核插件是 workspace 里的**独立 crate**：`crates/plugin-<name>/`（目录即插件，
+`<name>` 小写蛇形；包名约定 `sl-plugin-<name>`，`src/lib.rs` 为入口，实现
+`KernelPlugin` + 导出 `descriptor()`）。**build.rs 自动发现**：`sl-agent` 二进制的
+build.rs（`crates/sl-agent/build.rs`）构建期扫描 `crates/plugin-*/`、读取包名、
+生成 `builtin_kernel_plugins()` 清单，`sl-agent` 装配时逐条注册（新增插件无需改
+任何 Rust 代码；目录根放空文件 `disabled` 可跳过注册）。首个内置插件 `storage`
+（纯服务提供者：JSONL 会话事实日志落盘，ADR-0007 第二步）。参考模板：
+`docs/plugin-dev/reference/kernel_plugin.rs`（复制为 `crates/plugin-<name>/src/lib.rs`
+即开工；另需根 Cargo.toml members 与 `crates/sl-agent/Cargo.toml` 依赖各加一行）。
 
-> 规划：ADR-0008（P3）将内核插件从目录升级为**独立 crate**（`crates/plugin-*/`），
-> 整个 workspace 编译成一个二进制；P3 前保持目录形态。
+> 插件 crate 自带依赖、不回流引擎（crate 边界即信任边界）；引擎只提供契约
+> （`KernelPlugin` / `KernelDescriptor` / `SessionStore` 等），不依赖任何插件 crate。
+> P2 及之前的目录形态（`src/plugin/`）已被本形态取代（ADR-0008，P3 落地）。
 
 **Rune 脚本插件热重载（P2 落地）**：`rune::ScriptPluginLoader` 轮询插件目录，变更时
 `Registry::remove_namespace` 摘旧条目 → `ScriptPluginHandle::reload` 线程重编译 →
@@ -296,8 +322,9 @@ seq 连续、落盘后不可修改），消息历史由**遮蔽投影**派生（
 
 ### 新增内核/用户插件
 
-按 [docs/plugin-dev.md](plugin-dev.md)：一插件一目录（`mod.rs` 契约 + `core.rs` 实现 +
-聚合点显式注册），用户插件只写 `requires`，内核插件可 `provides`。
+按 [docs/plugin-dev.md](plugin-dev.md)：用户插件一插件一目录（`mod.rs` 契约 +
+`core.rs` 实现 + 聚合点显式注册），用户插件只写 `requires`；内核插件是独立
+crate（`crates/plugin-*/`，见 §4.4），可 `provides`。
 
 ### 新增 RPC 业务方法
 
@@ -316,9 +343,9 @@ seq 连续、落盘后不可修改），消息历史由**遮蔽投影**派生（
 ```bash
 cargo fmt --check
 cargo check
-cargo test --all-targets --all-features   # 含 rune-plugins / server 门控代码
+cargo test --all-targets --all-features   # 含 rune-plugins 门控代码
 cargo clippy --all-targets --all-features -- -D warnings
-cargo test --test live_api -- --ignored   # 真实 API（key 只从本地配置读取，输出不得打印密钥）
+cargo test -p so-lite-agent --test live_api -- --ignored   # 真实 API（key 只从本地配置读取，输出不得打印密钥）
 ```
 
 涉及模型协议、注册表、loop、会话或 RPC 的改动，不能只依赖 mock 单测；必须补真实链路或
@@ -326,8 +353,9 @@ cargo test --test live_api -- --ignored   # 真实 API（key 只从本地配置�
 
 ## 13. 设计红线
 
-- 引擎 crate 保持业务无关（ADR-0004）；仓库为 Cargo workspace（ADR-0008，P3 落地），
-  P3 前保持单 crate + `src/plugin/` 内核插件目录（build.rs 自动发现，ADR-0036）；
+- 引擎 crate 保持业务无关（ADR-0004）；仓库为 Cargo workspace（ADR-0008，P3 已落地）：
+  引擎 `crates/engine` + 内核插件 crate `crates/plugin-*`（build.rs 自动发现，
+  ADR-0036 改造）+ 官方二进制 `crates/sl-agent`，最终编译成一个二进制；
 - 用户插件不直触资源（只能经 `requires` 句柄）；内核插件特权入口经 `KernelContext`；
 - `UserOnly` 工具不进入模型工具列表，所有入口点经 Registry/Dispatch；
 - 审计默认全覆盖，敏感值脱敏；

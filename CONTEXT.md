@@ -57,7 +57,7 @@ _Avoid_: SettingsChanged（业务命名）
 ## 插件与服务
 
 **Kernel plugin（内核插件）**:
-运行在内核信任边界内的特权子系统，负责敏感资源与能力（如会话存储、模型 Provider、业务服务）；经两段式契约注册，注册上下文为全量服务句柄。职责是**收紧权限与能力供给**（provides 服务、特权入口、护栏/压缩等运行时能力）。仅以 Rust 编写，且只由维护者编译进官方二进制（**Linus 模式**，ADR-0006）：不存在动态内核扩展机制（无 dll / 无签名脚本 / 无加载面），第三方需要新内核能力 = 交 PR 或 fork；fork 定制者在 `src/plugin/` 写内核插件编进自己的二进制（受信集成路径，ADR-0036 构建期自动发现）。防篡改由「没有可加载物」保证。
+运行在内核信任边界内的特权子系统，负责敏感资源与能力（如会话存储、模型 Provider、业务服务）；经两段式契约注册，注册上下文为全量服务句柄。职责是**收紧权限与能力供给**（provides 服务、特权入口、护栏/压缩等运行时能力）。仅以 Rust 编写，且只由维护者编译进官方二进制（**Linus 模式**，ADR-0006）：不存在动态内核扩展机制（无 dll / 无签名脚本 / 无加载面），第三方需要新内核能力 = 交 PR 或 fork；fork 定制者在 `crates/plugin-*/` 写内核插件 crate 编进自己的二进制（受信集成路径，ADR-0036 构建期自动发现）。防篡改由「没有可加载物」保证。
 _Avoid_: 系统服务、内核级插件（口语）
 
 **User plugin（用户插件）**:
@@ -127,7 +127,7 @@ _Avoid_: 任务名（过窄）
 _Avoid_: 会话日志（与诊断日志混淆）
 
 **Workspace（工作区）**:
-仓库编译组织形态（ADR-0008）：从单 crate 改为 Cargo workspace——内核插件以**独立 crate** 编写（`crates/plugin-*/`），整个 workspace 最终**编译成一个二进制**（`sl-agent`）。引擎 crate 保持业务无关（ADR-0004），插件 crate 声明自己的依赖；crate 边界即信任边界（Linus 模式：只有维护者能加插件 crate）。P3 落地，P2 保持 `src/plugin/` 目录形态。
+仓库编译组织形态（ADR-0008，P3 已落地）：Cargo workspace——`crates/engine`（引擎 `so-lite-agent`，业务无关）+ 内核插件**独立 crate**（`crates/plugin-*/`）+ 官方二进制 `crates/sl-agent`，整个 workspace 最终**编译成一个二进制**（`sl-agent`）。插件 crate 声明自己的依赖，不回流引擎；crate 边界即信任边界（Linus 模式：只有维护者能加插件 crate）。新增插件只改清单（根 members + sl-agent 依赖各一行），注册装配由 sl-agent 的 build.rs 自动发现（ADR-0036 改造）。
 _Avoid_: 多二进制分发（仍是单二进制）
 
 **Message tree（消息树）**:

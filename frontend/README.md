@@ -14,7 +14,7 @@ npm run dev          # http://localhost:5173
 另开终端起后端（见仓库根 README）：
 
 ```bash
-cargo run --bin sl-agent --features server,rune-plugins
+cargo run -p sl-agent
 ```
 
 浏览器打开 `http://localhost:5173` 即连 `ws://127.0.0.1:8080/ws`。

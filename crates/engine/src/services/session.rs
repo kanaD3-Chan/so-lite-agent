@@ -328,7 +328,8 @@ struct Inner {
 }
 
 /// M2 默认会话存储：全内存事件日志，重启即失。文件实现由使用方提供
-/// （crate 内置 JSONL 实现见 `crate::plugin::storage`）。
+/// （crate 内置 JSONL 实现见 [`crate::services::JsonlSessionStore`]；内核插件
+/// `storage` 在 workspace 的 `crates/plugin-storage/`，ADR-0008）。
 #[derive(Clone)]
 pub struct InMemorySessionStore {
     inner: Arc<Mutex<Inner>>,

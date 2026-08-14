@@ -14,8 +14,8 @@ Web 应用形态），而非「cargo add 库」；ADR-0006/0008 中"crate 库形
 - **开发自己 agent 的方式**（对应用户选定的主线）：
   1. **sl-agent 扩展者**：跑官方二进制，写 **Rune 脚本用户插件**（目录形态：
      manifest.json + plugin.rn），无需 cargo、无需 fork；
-  2. **fork 定制者**：fork 仓库改**内核插件**（`src/plugin/`，Linus 模式，
-     build.rs 自动发现，ADR-0036）与装配，编译自己的 `sl-agent` 二进制；
+  2. **fork 定制者**：fork 仓库改**内核插件**（`crates/plugin-*/`，Linus 模式，
+     build.rs 自动发现，ADR-0036 改造）与装配，编译自己的 `sl-agent` 二进制；
 - **mistake-agent**：维持独立二进制（其内核级业务留在自己二进制），不再存在
   "以 crate 集成"的依赖关系；参考实现价值不变。
 

@@ -2079,6 +2079,29 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e3a9fe34e3e7a50316060351f37187a3f546bce95496156754b601a5fa71b76e"
 
 [[package]]
+name = "sl-agent"
+version = "0.1.0"
+dependencies = [
+ "axum",
+ "futures-util",
+ "log",
+ "reqwest",
+ "serde_json",
+ "sl-plugin-storage",
+ "so-lite-agent",
+ "tokio",
+ "tokio-stream",
+ "tokio-tungstenite 0.30.0",
+]
+
+[[package]]
+name = "sl-plugin-storage"
+version = "0.1.0"
+dependencies = [
+ "so-lite-agent",
+]
+
+[[package]]
 name = "slab"
 version = "0.4.12"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2095,7 +2118,6 @@ name = "so-lite-agent"
 version = "0.1.0"
 dependencies = [
  "async-trait",
- "axum",
  "chrono",
  "futures-util",
  "jsonschema",
@@ -2109,7 +2131,6 @@ dependencies = [
  "thiserror",
  "tokio",
  "tokio-stream",
- "tokio-tungstenite 0.30.0",
  "tokio-util",
  "uuid",
 ]

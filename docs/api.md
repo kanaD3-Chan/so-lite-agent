@@ -225,13 +225,13 @@ assistant/reasoning、ToolCall → tool/result、System → compaction/summary�
 ## 9. 插件契约
 
 写插件（用户/内核）不读本文档的其余部分：见 [docs/plugin-dev.md](plugin-dev.md) 与
-`examples/`（hello、plugins、folder_plugins）。参考模板在
+`crates/engine/examples/`（hello、plugins、folder_plugins）。参考模板在
 `docs/plugin-dev/reference/`（复制即开工）。
 
-## 10. `sl-agent` 服务端（feature `server`，二进制侧）
+## 10. `sl-agent` 服务端（二进制 crate，ADR-0006/0010）
 
 `sl-agent` 是业务无关的通用 Agent **API 服务**（ADR-0006/0010 前后端分离）：
-只提供 `/ws` + `/healthz`，不内嵌页面。`cargo run --bin sl-agent --features server,rune-plugins`
+只提供 `/ws` + `/healthz`，不内嵌页面。`cargo run -p sl-agent`
 启动后 API 在 `http://127.0.0.1:8080`（`SL_AGENT_PORT` 改端口，`SL_AGENT_DATA_DIR`
 改会话数据目录（默认 `./data`，JSONL 落盘），`SL_AGENT_API_URL/API_KEY/MODEL` 接
 真实 OpenAI 兼容端点，缺省 mock 模型）。前端独立运行：`frontend/`（React 参考实现，
@@ -241,11 +241,12 @@ WS 协议复用 §4 的帧格式：浏览器发 `RpcRequest` JSON 文本帧，�
 `RpcFrame::Response`（带 id 回执）；kernel 事件流经广播推 `RpcFrame::Event`
 （`message_delta` / `reasoning_delta` / `tool_start` / `tool_end` / `turn_end` /
 `tool_progress` / `custom`…）。事件先于回执（单一有序广播路径）。HTTP 侧：
-`GET /` 与 `/{path}` 服务内嵌静态资源（`web/`），`GET /healthz` 探活。
+`GET /healthz` 探活（根路径与其它路径不提供静态页，返回 404——前后端分离
+ADR-0010，静态资源由前端自己托管）。
 
 ## 10. 参考
 
-- [examples/hello.rs](../examples/hello.rs)：最小内核 + hello 回合；
-- [examples/plugins.rs](../examples/plugins.rs)：自定义服务 + 内核插件 + 用户插件端到端；
-- [examples/folder_plugins](../examples/folder_plugins/main.rs)：一插件一目录编排；
-- [tests/rpc_round.rs](../tests/rpc_round.rs)：RPC 子集往返测试。
+- [crates/engine/examples/hello.rs](../crates/engine/examples/hello.rs)：最小内核 + hello 回合；
+- [crates/engine/examples/plugins.rs](../crates/engine/examples/plugins.rs)：自定义服务 + 内核插件 + 用户插件端到端；
+- [crates/engine/examples/folder_plugins](../crates/engine/examples/folder_plugins/main.rs)：一插件一目录编排；
+- [crates/engine/tests/rpc_round.rs](../crates/engine/tests/rpc_round.rs)：RPC 子集往返测试。

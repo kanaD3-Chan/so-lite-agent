@@ -12,6 +12,13 @@
 > **P1 已落地**（2026-08-13）：seam 化 + AgentLoop trait + rune 宿主 + Rune 用户插件桥
 > （检查点结论：a1 DynamicService / b1 事件+日志 / c2 目录+清单 / d1 模块级函数 / e1 默认关）
 > + `sl-agent` 服务入口，浏览器 hello 回合与脚本插件端到端经真实 WS 客户端验收。
+>
+> **P2 已落地**（2026-08-14 收尾）：会话事实日志（事件日志 + 遮蔽投影 + JSONL 落盘）、
+> Rune 一等支持（热重载 + 执行超时）、事件决策分离（LoopHook）、GUI 前后端分离
+> （React 参考前端，ADR-0010）。
+>
+> **P3 启动**（2026-08-14）：workspace 化（ADR-0008）已落地，其余（web 打磨 / 配置组合 /
+> mistake 迁移评估）待评估。
 
 ## M2：新仓库骨架（已落地）
 
@@ -110,9 +117,15 @@ requires 句柄）端到端注册并调用；AgentLoop trait 化后默认实现�
 
 ## P3：分发形态评估（评估项）
 
-- **workspace 化（ADR-0008，✅ 决策已留痕）**：仓库改为 Cargo workspace——内核插件
-  独立 crate（`crates/plugin-*/`），整个 workspace 编译成一个二进制（`sl-agent`）；
-  engine crate 保持业务无关；build.rs 自动发现改扫 workspace 级插件目录；P3 执行迁移；
+- **workspace 化（ADR-0008，✅ 已落地 2026-08-14）**：仓库改为 Cargo workspace——
+  引擎 `crates/engine`（`so-lite-agent`，业务无关）+ 内核插件独立 crate
+  （`crates/plugin-*/`，首个 `plugin-storage`）+ 官方二进制 `crates/sl-agent`
+  （依赖引擎 + 全部内置插件），整个 workspace 最终编译成**一个二进制**（`sl-agent`）。
+  build.rs 自动发现（ADR-0036）改造为**二进制侧扫描 `crates/plugin-*/`** 生成注册清单
+  （引擎不再含插件目录）；新增内核插件 = 建 `crates/plugin-<name>/` + 根 members 与
+  sl-agent 依赖各加一行，**注册装配零 Rust 代码改动**。`server` feature 随 axum 迁到
+  二进制（二进制即服务端，不再 feature 门控）；引擎保留 `rune-plugins` feature
+  （默认关，二进制启用）。examples/tests 随引擎迁入 `crates/engine/`。
 - web 打磨：会话持久化落盘（已具备）、模型/凭据配置界面、错误与日志的用户面；
 - 配置驱动组合评估：重议 ADR-0005（profile/patch 类似物）——只有明确需求才做；
 - 会话事实日志词汇扩展评估：turn/step、raw chunk、tool 生命周期、compaction 锁、
