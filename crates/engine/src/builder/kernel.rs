@@ -177,8 +177,18 @@ impl Kernel {
                 {
                     *atts = attachments;
                 }
+                let user_id = user_msg.id;
                 self.store
                     .append_event(&key, SessionEvent::new(user_msg, SurfaceOp::Append))
+                    .await
+                    .map_err(session_err)?;
+
+                // 活跃路径推进到新用户消息——否则 read_path 沿上一回合末条
+                // 回溯，本回合自己的用户消息不进模型上下文（模型只能看到上
+                // 一条用户消息；SessionDecision 路径由调度器负责推进，本默认
+                // 路径此处补齐）。
+                self.store
+                    .set_active_path(&key, Some(user_id))
                     .await
                     .map_err(session_err)?;
 
