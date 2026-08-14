@@ -240,10 +240,13 @@ pub(crate) fn messages_to_cc(messages: &[Message]) -> Vec<Value> {
                 out.push(json!({"role": "user", "content": content}));
             }
             MessageKind::Assistant { text } => {
-                let mut m = json!({"role": "assistant", "content": text});
-                if let Some(r) = pending_reasoning.take() {
-                    m["reasoning_content"] = json!(r);
-                }
+                // DeepSeek V4 thinking 模式：assistant 消息必须带 reasoning_content
+                // 字段（无 thinking 轮也要空串，否则端点报 "must be passed back"）。
+                let m = json!({
+                    "role": "assistant",
+                    "content": text,
+                    "reasoning_content": pending_reasoning.take().unwrap_or_default(),
+                });
                 out.push(m);
             }
             MessageKind::System { text } => {
@@ -271,9 +274,11 @@ pub(crate) fn messages_to_cc(messages: &[Message]) -> Vec<Value> {
                     call_id.clone()
                 };
                 let arguments = serde_json::to_string(params).unwrap_or_else(|_| "{}".into());
-                let mut call_msg = json!({
+                // 工具调用轮同样必须带 reasoning_content（无 thinking 也要空串）。
+                let call_msg = json!({
                     "role": "assistant",
                     "content": null,
+                    "reasoning_content": pending_reasoning.take().unwrap_or_default(),
                     "tool_calls": [{
                         "id": call_id,
                         "type": "function",
@@ -283,9 +288,6 @@ pub(crate) fn messages_to_cc(messages: &[Message]) -> Vec<Value> {
                         },
                     }],
                 });
-                if let Some(r) = pending_reasoning.take() {
-                    call_msg["reasoning_content"] = json!(r);
-                }
                 out.push(call_msg);
                 let output = match result {
                     Ok(v) => serde_json::to_string(v).unwrap_or_else(|_| "{}".into()),
