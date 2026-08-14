@@ -42,6 +42,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 | `system_prompt(fn() -> String)` | 人格注入，每轮调用 | 空字符串 |
 | `summarizer(Arc<dyn Summarizer>)` | 压缩/交接摘要器 | `StubSummarizer` |
 | `session_switch(Arc<dyn SessionSwitch>)` | 回合内 `session::switch` 钩子 | 无（工具返回"不可用"） |
+| `session_decision(Arc<dyn SessionDecision>)` | 会话调度决策器（新消息前置决策 + 回合末决策；注入后 `send_user_message*` 委托决策器追加/分叉/切换，不再自行 append） | 无（默认 create + append） |
 | `max_tool_calls(usize)` | 单回合工具调用上限 | 25 |
 | `max_consecutive_failures(usize)` | 同码错误连续停止阈值 | 3 |
 | `context_limit_tokens(usize)` | 上下文窗口（压缩阈值 = 75%） | 131072 |
@@ -74,15 +75,17 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 |---|---|
 | `send_user_message(key, text)` | 开新回合；会话不存在自动创建，新增消息落回 `SessionStore` |
 | `send_user_message_with_attachments(key, text, attachments)` | 带附件（中性 path+name，数据由使用方填充） |
+| `send_user_message_forced(key, text, display_text, attachments, forced_wire)` | 显式工具调用：开回合强制模型首轮调用指定工具（wire name），工具结果回填后由模型继续生成回复——不绕过 LLM（唯一决策者不变）；`text` = 模型指令文本、`display_text` = 落盘展示文本（两者分离） |
 | `call_command(entry, params)` | 用户触发入口（trigger_command 等价）；找不到 Command 回退同名 Tool |
 | `abort()` | 取消当前回合（无活动回合时静默） |
 | `get_state()` | `{running: bool}` |
-| `edit_message(key, message_id, text)` | 消息树编辑：只可编辑 assistant 消息，从编辑点派生新分支 |
+| `edit_message(key, message_id, text)` | 消息树编辑（user "改完重发"：只可编辑 user 消息，从编辑点派生新分支；**重新生成（改写 assistant）禁用**） |
 | `switch_branch(key, message_id)` | 切换活跃路径，返回新路径消息 |
-| `list_sessions()` / `read_session(key)` | 会话元数据 / 活跃路径消息 |
-| `list_tools()` | 模型可见工具列表（wire name + JSON Schema） |
+| `list_sessions()` | 会话元数据列表 |
+| `read_session(key)` | 会话**全量消息树**（逻辑时间线：压缩摘要节点前插到压缩点，被遮蔽分支/历史完整保留——前端树视图 + `< / >` 分支导航数据源；模型可见活跃链另经 `read_path`） |
+| `list_tools()` | 用户可见工具目录（GUI 工具面板数据源：UserAndModel **且** `user_visible=true`，wire name + JSON Schema + title/icon；`session::switch` 等仅模型工具不出现；模型可见工具全量列表另经 `registry().model_tools()`） |
 | `handle_rpc(RpcRequest)` | 通用 RPC 入口，返回带 id 的响应帧 |
-| `registry()` / `dispatch()` / `auditor()` / `events()` / `interrupt_bus()` | 深度集成访问点（一般用不到） |
+| `registry()` / `dispatch()` / `auditor()` / `events()` / `interrupt_bus()` / `registry_arc()` | 深度集成访问点（一般用不到；`registry_arc()` 返回与 kernel 同一注册表实例的 Arc，供 `ScriptPluginLoader` 等外部装配共享） |
 
 ## 4. 通用 RPC
 
@@ -100,15 +103,15 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
 | method | 参数 | 说明 |
 |---|---|---|
-| `send_user_message` | `session_key?`, `text`, `attachments?` | 开新回合（None = 默认会话） |
+| `send_user_message` | `session_key?`, `text`, `attachments?`, `force_tool?` | 开新回合（None = 默认会话）；`force_tool = {entry, hint?, display?}` 显式工具调用（entry 为内部全名 `namespace::tool`，UserOnly 工具拒绝） |
 | `trigger_command` | `entry`, `params?` | 用户触发入口 |
-| `edit_message` | `session_key`, `message_id`, `text` | 派生新分支 |
+| `edit_message` | `session_key`, `message_id`, `text` | 派生新分支（user "改完重发"） |
 | `switch_branch` | `session_key`, `message_id` | 切活跃路径 |
 | `abort` | — | 停止当前回合 |
 | `get_state` | — | 运行状态 |
 | `list_sessions` | — | 会话列表 |
-| `read_session` | `session_key` | 活跃路径消息 |
-| `list_tools` | — | 模型工具列表 |
+| `read_session` | `session_key` | 全量消息树（逻辑时间线，含被遮蔽分支与压缩摘要节点） |
+| `list_tools` | — | 用户可见工具目录（`user_visible=true`） |
 | `custom` | `method`, `params?` | 业务方法兜底（走 `RpcExtension`） |
 
 ### 4.3 业务方法扩展
@@ -155,6 +158,8 @@ KernelBuilder::new().rpc_extension(Arc::new(MyExt)).build()?;
   `ModelHandle` 与 loop）。
 - `ModelRequest`：`model`（Main/Vision）、`messages`、`tools?`、`reasoning_effort?`、
   `response_format?`、`tool_choice?`（`auto` / `required` / `function{name}`）。
+  `ToolSchema`（模型可见工具）= wire name + description + JSON Schema + **GUI 展示元数据**
+  （`title` 用户友好显示名、`icon` Iconify 图标名，`list_tools`/`user_entries` 目录用）。
 - `ModelChunk`：`TextDelta` / `ReasoningDelta` / `ReasoningItemStart` / `ToolCallStart` /
   `ToolCallDelta` / `ItemDone` / `Usage` / `Done` —— 流式事件归一化。
 - `ModelHandle`：注入插件的受限句柄，只暴露带超时 + abort + 审计的 `complete`；
@@ -201,7 +206,10 @@ let service = register_openai_compatible(&registry, "deepseek", OpenAiCompatible
   / `read_events`（全量日志，含被遮蔽事件）/ `resolve_seq`（消息 id → 事件 seq）；
 - 投影：`read_path`（活跃链，默认末端 = `active_path` 或最新 surface 事件）/
   `read_path_from(end_seq)`（任意末端，switch_branch）/ `set_active_path` /
-  `read_all`（全量日志 → 消息，人读 transcript）。
+  `read_all`（全量日志 → 消息，人读 transcript）/
+  `read_timeline`（**逻辑顺序全量时间线**：压缩摘要节点前插到其被压缩段之后，
+  遮蔽不删除、历史不因压缩消失——前端完整渲染用；`timeline_messages` /
+  `is_compaction_summary` 纯函数从 `services` 导出，缺省 = 日志顺序）。
 
 事件 = `{ seq, message, surface_op?, source_event_seqs?, created_at }`；`message.kind`
 即事件判别（User → user/message、Assistant → assistant/message、Reasoning →

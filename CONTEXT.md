@@ -123,7 +123,7 @@ _Avoid_: 会话 ID（暗示用户可见）
 _Avoid_: 任务名（过窄）
 
 **Session event log（会话事实日志）**:
-会话的**不可变真相**（ADR-0007）：per-session append-only 事件序列（lossless JSON、seq 连续、落盘后不修改）；事件类型 = user/assistant message、reasoning、tool/result、edit、compaction/summary；编辑/重新生成/压缩统一为「追加 + replace 遮蔽 + 投影」，可回放/恢复/审计。参考 DSH `SessionEventMap` / `SurfaceOp`。与 `EventSink`（GUI 播报）严格分离。crate 提供 `InMemorySessionStore`（默认）与 `JsonlSessionStore`（JSONL 落盘 + 崩溃尾部修复，`sl-agent` 默认启用，ADR-0007 第二步）。
+会话的**不可变真相**（ADR-0007）：per-session append-only 事件序列（lossless JSON、seq 连续、落盘后不修改）；事件类型 = user/assistant message、reasoning、tool/result、edit、compaction/summary；编辑/重新生成/压缩统一为「追加 + replace 遮蔽 + 投影」，可回放/恢复/审计。参考 DSH `SessionEventMap` / `SurfaceOp`。与 `EventSink`（GUI 播报）严格分离。crate 提供 `InMemorySessionStore`（默认）与 `JsonlSessionStore`（JSONL 落盘 + 崩溃尾部修复，`sl-agent` 默认启用，ADR-0007 第二步）。投影视图：活跃链 `read_path`（模型上下文）与**全量时间线 `read_timeline`**（逻辑顺序，压缩摘要节点前插到压缩点，遮蔽不删除、历史不因压缩消失——前端完整渲染用）。
 _Avoid_: 会话日志（与诊断日志混淆）
 
 **Workspace（工作区）**:
@@ -148,4 +148,8 @@ _Avoid_: 总结模型（指具体实现）
 
 **SessionSwitch（会话切换钩子）**:
 回合内 `session::switch` 由 loop 调用的钩子；默认调度器与 `session::switch` 工具注册由使用方实现，经 `KernelBuilder::session_switch` 注入。
+_Avoid_: Session scheduler（mistake-agent 内部模块名）
+
+**SessionDecision（会话调度决策器）**:
+会话级调度决策 seam（mistake-agent `SessionScheduler` 形态，上游 ADR-0010）：**新消息前置决策**（先判断要不要切换上下文再回答，返回进入回合的会话 key 与消息链）+ **回合末决策**（continue / update_goal / start_new）。注入（`KernelBuilder::session_decision`）后 `Kernel::send_user_message*` 委托决策器追加/分叉/切换，不再自行 append user 消息；未注入默认 create + append。与 `SessionSwitch`（回合内 `session::switch` 钩子，粒度更小）是两级：决策器是回合级调度，切换钩子是回合内动作。
 _Avoid_: Session scheduler（mistake-agent 内部模块名）

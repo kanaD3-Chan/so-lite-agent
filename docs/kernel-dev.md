@@ -42,6 +42,10 @@ pivot（ADR-0006）后，可替换能力形式化为三角角色——**换 Prov
   Consumer = `AgentLoop`（唯一消费方）。
 - **session seam**：Definition = `SessionStore`（持久化契约）；Provider = `InMemorySessionStore`
   （文件实现由使用方提供）；Consumer = `Kernel` / `AgentLoop`（消息树与压缩接入存储链）。
+  会话**调度决策**（新消息前置决策 / 回合末决策）另成一级 seam：Definition =
+  `SessionDecision`（`agent/session.rs`）；Provider = 使用方实现（mistake-agent
+  `SessionScheduler` 形态）；Consumer = `Kernel::send_user_message*`（注入后委托决策器
+  追加/分叉/切换，默认路径为 create + append）。
 - **loop seam**：Definition = `AgentLoop` trait（`run_turn`）；Provider = `DefaultAgentLoop`
   （内置默认实现，经 `KernelBuilder::loop_engine` 可替换）；Consumer = `Kernel::send_user_message` /
   通用 RPC `send_user_message`。
@@ -104,8 +108,8 @@ agent/
 │   │   ├── mod.rs            Agent loop 公共面（pub use 重导出）
 │   │   ├── types.rs          TurnInput/TurnOutcome/StopReason/CompactionInfo/LoopError
 │   │   ├── hooks.rs          LoopHook 决策链（before_tool 改写/拒绝，P2）
-│   │   └── engine.rs         AgentLoop（护栏、压缩、中断消费、session::switch）
-│   └── session.rs            SessionKey/Goal/InterruptBus/Summarizer/SessionSwitch
+│   │   └── engine.rs         AgentLoop（护栏、压缩、中断消费、session::switch、context::compact）
+│   └── session.rs            SessionKey/Goal/InterruptBus/Summarizer/SessionSwitch/SessionDecision
 model/
 │   ├── mod.rs                模型层公共面（pub use 重导出）
 │   ├── contract.rs           ModelService/ModelRequest/ModelChunk/ModelError
@@ -269,11 +273,17 @@ LLM 唯一决策循环；`DefaultAgentLoop` 是内置默认实现（`KernelBuild
 - 单回合总超时（`turn_budget`，默认 10 分钟）与用户取消；
 - 模型瞬时错误重试一次；系统性错误（鉴权/配额/模型不存在）直接中止；
 - 上下文用量 ≥ 窗口 75% 时在回合边界压缩：最近 15 条保留（`compaction_keep_last`），
-  其余交给注入的 `Summarizer` 生成摘要，原文仍保留在存储；摘要失败下回合再试。
+  其余交给注入的 `Summarizer` 生成摘要，原文仍保留在存储；摘要失败下回合再试；
+- **回合内手动压缩**：`context::compact` 工具（loop 拦截入口，`full_name` 命中）立即
+  执行压缩，同回合后续模型请求即见压缩后上下文；链长 < `keep_last + 5` 时 no-op
+  （防模型反复调用烧摘要 token）；调用消息照常落时间线（与 `session::switch` 控制
+  消息不落树不同——压缩是用户可见真实事件）。
 
 `forced_tool`（wire name）支持首轮强制调用工具（全程 `thinking=none`）；
 `session::switch` 是 loop 特殊处理的入口：不走普通 handler，而是调用注入的
-`SessionSwitch` 钩子，切换后的新会话键回填到 `TurnOutcome.session_key`。
+`SessionSwitch` 钩子，切换后的新会话键回填到 `TurnOutcome.session_key`；
+`context::compact` 同理为 loop 拦截入口（见上）。两个入口的工具声明
+（`ToolDef`，含 `user_visible` 控制 GUI 可见性）由使用方注册。
 
 ## 9. 会话事实日志（ADR-0007）
 
@@ -286,16 +296,21 @@ seq 连续、落盘后不可修改），消息历史由**遮蔽投影**派生（
 - 事件日志：`append_event`（追加，seq 自动分配，校验 JSON 可序列化 + surface 合法）/
   `read_events`（全量日志）/ `resolve_seq`（消息 id → 事件 seq）；
 - 投影：`read_path`（活跃链）/ `read_path_from(end_seq)`（任意末端，分支）/
-  `set_active_path` / `read_all`（全量日志 → 消息，人读 transcript）；
+  `set_active_path` / `read_all`（全量日志 → 消息，人读 transcript）/
+  `read_timeline`（**逻辑顺序全量时间线**：压缩摘要节点前插到压缩点，遮蔽不删除、
+  历史不因压缩消失——前端完整渲染用；纯函数 `timeline_messages` / `is_compaction_summary`
+  从 `services` 导出，缺省 = 日志顺序）；
 - 编辑（user "改完重发"）/压缩统一为「追加事件 + `SurfaceOp::Replace` 遮蔽旧事件 +
   `source_event_seqs` 记录被遮蔽 seq」；**重新生成（改写 assistant）禁用**；投影纯函数 `fold_surface` / `chain_from`
   / `project_messages` 从 `services` 导出。
 
-活跃链从末端沿遮蔽链回溯；LLM 上下文只包含活跃链投影。会话切换的**决策**（新消息
-先判断、回合末 continue/update_goal/start_new）不是通用语义，由使用方实现：crate 只
-提供 `SessionSwitch` 钩子（`KernelBuilder::session_switch` 注入）与 `Summarizer`
-（`KernelBuilder::summarizer` 注入）；`session::switch` 工具也由使用方注册
-（参照 [docs/plugin-dev.md](plugin-dev.md)）。
+活跃链从末端沿遮蔽链回溯；LLM 上下文只包含活跃链投影。会话**调度决策**（新消息
+先判断、回合末 continue/update_goal/start_new）是使用方语义：crate 提供
+`SessionDecision` 决策器 seam（`KernelBuilder::session_decision` 注入，mistake-agent
+`SessionScheduler` 形态）——注入后 `send_user_message*` 委托其追加/分叉/切换，未注入
+则默认 create + append（本回合用户消息与回合末消息都会推进活跃路径）。回合内切换
+走 `SessionSwitch` 钩子（`KernelBuilder::session_switch` 注入）；`session::switch` /
+`context::compact` 工具由使用方注册（参照 [docs/plugin-dev.md](plugin-dev.md)）。
 
 ## 10. RPC 与事件
 
