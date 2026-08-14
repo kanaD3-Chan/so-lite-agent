@@ -201,8 +201,15 @@ impl Dispatch {
             .map_err(|e| ToolError::internal(format!("schema 序列化失败：{e}")))?;
         let validator = jsonschema::validator_for(&schema)
             .map_err(|e| ToolError::internal(format!("schema 无效：{e}")))?;
+        // 模型对无参数工具常省略参数（null）：按空对象语义校验——
+        // required 字段仍会拒绝缺键，无参数工具自然放行。
+        let effective = if params.is_null() {
+            serde_json::Value::Object(serde_json::Map::new())
+        } else {
+            params.clone()
+        };
         validator
-            .validate(params)
+            .validate(&effective)
             .map_err(|e| ToolError::invalid_params(format!("参数校验失败：{e}")))
     }
 
