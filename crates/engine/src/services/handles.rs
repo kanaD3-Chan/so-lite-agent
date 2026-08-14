@@ -111,6 +111,9 @@ impl ServiceHandles {
     }
 
     /// 按能力声明过滤：插件只拿到声明过的服务（结构上受限）。
+    /// 同一 id 的 custom（Rust downcast）与 dynamic（脚本调用）**并存传播**
+    /// （`with_dynamic` 文档承诺"可与 with_custom 同 id 并存"；曾用 else-if
+    /// 只传其一，导致双注册服务的脚本侧 requires 取不到 dynamic 实现）。
     pub fn filter(&self, requires: &[ServiceId]) -> ServiceHandles {
         let mut out = ServiceHandles::default();
         for id in requires {
@@ -118,12 +121,60 @@ impl ServiceHandles {
                 out.session = self.session.clone();
             } else if id == &ServiceId::model() {
                 out.model = self.model.clone();
-            } else if let Some(v) = self.custom.get(id) {
-                out.custom.insert(id.clone(), v.clone());
-            } else if let Some(v) = self.dynamic.get(id) {
-                out.dynamic.insert(id.clone(), v.clone());
+            } else {
+                if let Some(v) = self.custom.get(id) {
+                    out.custom.insert(id.clone(), v.clone());
+                }
+                if let Some(v) = self.dynamic.get(id) {
+                    out.dynamic.insert(id.clone(), v.clone());
+                }
             }
         }
         out
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::contract::ToolError;
+    use crate::services::dynamic::DynamicService;
+    use async_trait::async_trait;
+    use serde_json::Value;
+    use std::sync::Arc;
+
+    struct NotesService;
+
+    #[async_trait]
+    impl DynamicService for NotesService {
+        async fn call(&self, _method: &str, _params: Value) -> Result<Value, ToolError> {
+            Ok(Value::Null)
+        }
+    }
+
+    #[test]
+    fn filter_preserves_same_id_custom_and_dynamic() {
+        // 同 id 双注册（with_custom + with_dynamic）后，filter 应**并存传播**：
+        // Rust 插件仍可 downcast，脚本侧仍可取 dynamic（ADR-0006 承诺）。
+        let svc = Arc::new(NotesService);
+        let handles = ServiceHandles::default()
+            .with_custom(ServiceId::custom("notes"), svc.clone())
+            .with_dynamic(ServiceId::custom("notes"), svc);
+        let id = ServiceId::custom("notes");
+        let filtered = handles.filter(std::slice::from_ref(&id));
+        assert!(
+            filtered.get_custom::<NotesService>(&id).is_some(),
+            "custom 应传播"
+        );
+        assert!(
+            filtered.get_dynamic(&id).is_some(),
+            "dynamic 应传播（脚本侧 requires）"
+        );
+        assert!(
+            handles
+                .filter(std::slice::from_ref(&id))
+                .get_dynamic(&id)
+                .is_some()
+        );
     }
 }
