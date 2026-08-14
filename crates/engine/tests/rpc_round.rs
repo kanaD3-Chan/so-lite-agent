@@ -162,5 +162,11 @@ async fn edit_message_derives_branch() {
     );
 
     let all = kernel.read_session(&key).await.unwrap();
-    assert_eq!(all.len(), 1); // 活跃路径 = 改后的问题
+    // read_session = 全量消息树（mistake-agent 同款）：旧分支（原 user + assistant）
+    // 与被遮蔽历史仍在（< / > 可切回），活跃链 = 改后的问题。
+    assert_eq!(all.len(), 3, "全量树：原 user + assistant + 编辑后的 user");
+    assert!(
+        all.iter().any(|m| matches!(&m.kind, MessageKind::User { text, .. } if text == "改后的问题")),
+        "编辑后的 user 在全量树中"
+    );
 }

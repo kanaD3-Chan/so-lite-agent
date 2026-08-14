@@ -529,8 +529,11 @@ impl Kernel {
         self.store.list_sessions().await.map_err(session_err)
     }
 
+    /// 读取会话**全量消息树**（事件日志顺序，含真实 parent_id 与被遮蔽分支——
+    /// 前端据此构建树视图 + < / > 分支导航，mistake-agent read_session 同款）；
+    /// 活跃链（模型上下文）另经 `read_path` 获得。
     pub async fn read_session(&self, key: &SessionKey) -> Result<Vec<Message>, LoopError> {
-        self.store.read_path(key).await.map_err(session_err)
+        self.store.read_all(key).await.map_err(session_err)
     }
 
     /// 模型可见工具列表（wire name）。
