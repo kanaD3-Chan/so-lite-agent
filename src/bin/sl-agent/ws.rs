@@ -41,7 +41,15 @@ impl EventSink for WsHub {
 /// 回执在 `handle_rpc` 返回后入队，保证"事件先到、回执后到"；回执带 id，多连接
 /// 各取所需（P1 本地单用户，跨连接可见可接受）。
 pub async fn ws_upgrade(ws: WebSocketUpgrade, State(state): State<Arc<AppState>>) -> Response {
-    ws.on_upgrade(move |socket| handle(socket, state))
+    let resp = ws.on_upgrade(move |socket| handle(socket, state));
+    // 前后端分离（ADR-0010）：前端独立部署（任意 Origin 的 WS 连接都接受）。
+    // 浏览器 WS 不受同源策略限制，但显式回 ACAO 头更稳（部分环境/代理会拦）。
+    let mut resp = resp;
+    resp.headers_mut().insert(
+        axum::http::header::ACCESS_CONTROL_ALLOW_ORIGIN,
+        axum::http::HeaderValue::from_static("*"),
+    );
+    resp
 }
 
 async fn handle(socket: WebSocket, state: Arc<AppState>) {

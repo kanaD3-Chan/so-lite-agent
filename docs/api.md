@@ -230,11 +230,12 @@ assistant/reasoning、ToolCall → tool/result、System → compaction/summary�
 
 ## 10. `sl-agent` 服务端（feature `server`，二进制侧）
 
-`sl-agent` 是业务无关的通用 Agent 可执行文件（ADR-0006）：HTTP/WS + 内嵌前端，
-`cargo run --bin sl-agent --features server,rune-plugins` 启动后浏览器打开
-`http://127.0.0.1:8080`（`SL_AGENT_PORT` 改端口，`SL_AGENT_PLUGINS_DIR` 改插件目录，
-`SL_AGENT_DATA_DIR` 改会话数据目录（默认 `./data`，JSONL 落盘），
-`SL_AGENT_API_URL/API_KEY/MODEL` 接真实 OpenAI 兼容端点，缺省 mock 模型）。
+`sl-agent` 是业务无关的通用 Agent **API 服务**（ADR-0006/0010 前后端分离）：
+只提供 `/ws` + `/healthz`，不内嵌页面。`cargo run --bin sl-agent --features server,rune-plugins`
+启动后 API 在 `http://127.0.0.1:8080`（`SL_AGENT_PORT` 改端口，`SL_AGENT_DATA_DIR`
+改会话数据目录（默认 `./data`，JSONL 落盘），`SL_AGENT_API_URL/API_KEY/MODEL` 接
+真实 OpenAI 兼容端点，缺省 mock 模型）。前端独立运行：`frontend/`（React 参考实现，
+`npm run dev` → http://localhost:5173，`VITE_SL_AGENT_WS` 指后端 WS）。
 
 WS 协议复用 §4 的帧格式：浏览器发 `RpcRequest` JSON 文本帧，服务端回
 `RpcFrame::Response`（带 id 回执）；kernel 事件流经广播推 `RpcFrame::Event`

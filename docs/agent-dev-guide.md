@@ -17,11 +17,16 @@
 
 ## 路线 A：sl-agent 扩展者（写 Rune 脚本，最快）
 
-### 1. 跑起官方二进制
+### 1. 跑起官方 API + 前端
 
 ```bash
+# 终端 1：sl-agent API 服务（前后端分离 ADR-0010）
 cargo run --bin sl-agent --features server,rune-plugins
-# 打开 http://127.0.0.1:8080（默认 mock 模型，零配置 hello 回合）
+# API 在 http://127.0.0.1:8080（/ws + /healthz；默认 mock 模型，零配置 hello 回合）
+
+# 终端 2：官方参考前端（React）
+cd frontend && npm install && npm run dev
+# 浏览器打开 http://localhost:5173（自动连 WS）
 ```
 
 接真实模型（OpenAI 兼容端点，如 DeepSeek）：
@@ -32,7 +37,8 @@ SL_AGENT_API_URL=https://api.deepseek.com SL_AGENT_API_KEY=xxx SL_AGENT_MODEL=de
 ```
 
 环境变量：`SL_AGENT_PORT`（默认 8080）、`SL_AGENT_PLUGINS_DIR`（默认 `./plugins`）、
-`SL_AGENT_DATA_DIR`（默认 `./data`，会话 JSONL 落盘，ADR-0007）。
+`SL_AGENT_DATA_DIR`（默认 `./data`，会话 JSONL 落盘，ADR-0007）；
+前端后端地址经 `VITE_SL_AGENT_WS` 注入（默认 `ws://127.0.0.1:8080/ws`）。
 
 ### 2. 写第一个 Rune 脚本插件
 

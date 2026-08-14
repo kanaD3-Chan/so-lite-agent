@@ -1,12 +1,12 @@
 # So Lite Agent
 
 So Lite Agent 是**可执行文件项目**（官方简写 **SL Agent**，ADR-0009 不发布
-crates.io）：主交付 = 业务无关的通用 Agent 可执行文件（二进制 `sl-agent`，浏览器
-Web 应用形态：HTTP/WS 服务 + 内嵌前端），第三方以 Rune 脚本用户插件扩展、无需
-cargo 构建；内核能力仅由维护者编译进官方二进制（Linus 模式，见
-[ADR-0006](docs/adr/0006-pivot-harness-and-rune.md)）。源码仍是 Rust crate
-（crate 名 `so-lite-agent`，workspace 化后为引擎 crate，ADR-0008），作为仓库
-内部依赖存在，不做公共发布。
+crates.io）：主交付 = 业务无关的通用 Agent API 服务（二进制 `sl-agent`，HTTP/WS
+API，**前后端分离**：官方参考前端是 `frontend/` 的 React 工程，ADR-0010），第三方
+以 Rune 脚本用户插件扩展、无需 cargo 构建；内核能力仅由维护者编译进官方二进制
+（Linus 模式，见 [ADR-0006](docs/adr/0006-pivot-harness-and-rune.md)）。源码仍是
+Rust crate（crate 名 `so-lite-agent`，workspace 化后为引擎 crate，ADR-0008），
+作为仓库内部依赖存在，不做公共发布。
 
 参考 [earendil-works/pi](https://github.com/earendil-works/pi) 的分层——模型
 Provider 层与 Agent core 层内置随包，领域层（业务插件）由使用方编写。
@@ -62,10 +62,10 @@ let service = register_openai_compatible(&registry, "deepseek", OpenAiCompatible
 
 Anthropic 兼容端点用 `AnthropicModelService`；自定义端点就是改 `api_url`。
 
-## 快速开始：`sl-agent` 可执行文件（浏览器 Web 应用，ADR-0006）
+## 快速开始：`sl-agent` API 服务（前后端分离，ADR-0010）
 
 ```bash
-cargo run --bin sl-agent --features server,rune-plugins   # 打开 http://127.0.0.1:8080
+cargo run --bin sl-agent --features server,rune-plugins   # API 服务：http://127.0.0.1:8080
 ```
 
 零配置即跑通 hello 回合（默认 `MockModelService`）；接真实模型：
@@ -73,6 +73,13 @@ cargo run --bin sl-agent --features server,rune-plugins   # 打开 http://127.0.
 ```bash
 SL_AGENT_API_URL=https://api.deepseek.com SL_AGENT_API_KEY=xxx SL_AGENT_MODEL=deepseek-chat \
   SL_AGENT_PORT=8080 cargo run --bin sl-agent --features server,rune-plugins
+```
+
+**前端独立部署**（前后端分离，ADR-0010）：sl-agent 只提供 API（`/ws` + `/healthz`），
+不内嵌页面。官方参考前端是 React 工程：
+
+```bash
+cd frontend && npm install && npm run dev    # http://localhost:5173，自动连 WS
 ```
 
 Rune 脚本用户插件放 `./plugins/`（一插件一目录：`manifest.json` 声明 + `plugin.rn`
@@ -135,7 +142,7 @@ cargo clippy --all-targets --all-features -- -D warnings
 cargo fmt --check
 cargo run --example hello
 cargo run --example script_plugin --features rune-plugins   # Rune 脚本插件示例
-cargo run --bin sl-agent --features server,rune-plugins     # 浏览器 Web 应用
+cargo run --bin sl-agent --features server,rune-plugins     # API 服务（前端见 frontend/README）
 ```
 
 ## 术语

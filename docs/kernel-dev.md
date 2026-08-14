@@ -97,9 +97,9 @@ feature 门控（默认关，二进制启用）：
 │   ├── host.rs              宿主函数安装骨架（动态闭包，Send 约束）
 │   └── plugin.rs            插件桥：manifest 声明 + register 绑定 + requires 白名单
 │                            （每插件一条专用执行线程：rune Value !Send × dispatch Send）
-├── src/bin/sl-agent/        服务端（feature `server`）：main.rs（HTTP/静态/装配）
+├── src/bin/sl-agent/        服务端（feature `server`）：main.rs（HTTP/装配）
 │                             + ws.rs（WS/RPC 桥 + 事件广播，单一有序路径）
-└── web/                     内嵌前端（rust-embed，P1 纯 HTML/JS）
+└── frontend/                独立前端（React+TS，ADR-0010 前后端分离）：WS 连 sl-agent
 ```
 
 `mod.rs` 只负责公共面、装配和 `pub use` 重导出；职责实现放子模块（如

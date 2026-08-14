@@ -5,7 +5,7 @@
 ## 命名
 
 **SL Agent（官方简写）**:
-so-lite-agent 的官方简写；另一种写法是 **So Lite Agent**。文档、标题与口头交流优先用 SL Agent；代码与包名仍是 `so-lite-agent` / `so_lite_agent`，二进制名为 `sl-agent`（pivot 后以**浏览器 Web 应用**形态交付的业务无关通用 Agent 可执行文件：HTTP/WS 服务 + 内嵌前端，ADR-0006），不因简写改动。**可执行文件项目**（ADR-0009）：不发布 crates.io，开发自己的 Agent = sl-agent 扩展者（Rune 脚本）/ fork 定制者（改 Rust）。
+so-lite-agent 的官方简写；另一种写法是 **So Lite Agent**。文档、标题与口头交流优先用 SL Agent；代码与包名仍是 `so-lite-agent` / `so_lite_agent`，二进制名为 `sl-agent`（pivot 后交付的业务无关通用 Agent **API 服务**：HTTP/WS，**前后端分离**——官方参考前端是 `frontend/` 的 React 工程，ADR-0010），不因简写改动。**可执行文件项目**（ADR-0009）：不发布 crates.io，开发自己的 Agent = sl-agent 扩展者（Rune 脚本）/ fork 定制者（改 Rust）。
 _Avoid_: SLA、LiteAgent、SL-Agent（连字符变体）
 
 ## 运行时结构

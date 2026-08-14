@@ -2,7 +2,7 @@
 
 ## 项目速览
 
-So Lite Agent（官方简写 **SL Agent**，crate 名 `so-lite-agent`）是**可执行文件项目**（ADR-0009，不发布 crates.io）：agent loop、工具注册与调度、会话生命周期、模型 Provider 抽象与通用 RPC 随源码提供；**内核插件与用户插件由使用方自行编写**（fork 定制者写 Rust 内核插件 / sl-agent 扩展者写 Rune 脚本）。Rust 2024 edition；仓库为 Cargo workspace（ADR-0008，P3 落地），P3 前保持单 crate。主交付是业务无关的通用 Agent 可执行文件（二进制 `sl-agent`，浏览器 Web 应用形态：HTTP/WS + 内嵌前端）与 Rune 脚本用户插件路径，内核能力仅由维护者编译进官方二进制（Linus 模式，见 [docs/adr/0006](docs/adr/0006-pivot-harness-and-rune.md)）。mistake-agent 是本仓库的参考实现（保持独立二进制，见 [docs/adr/0001](docs/adr/0001-independent-repo-skip-m1.md)）。基于本项目开发自己的 Agent 见 [docs/agent-dev-guide.md](docs/agent-dev-guide.md)。
+So Lite Agent（官方简写 **SL Agent**，crate 名 `so-lite-agent`）是**可执行文件项目**（ADR-0009，不发布 crates.io）：agent loop、工具注册与调度、会话生命周期、模型 Provider 抽象与通用 RPC 随源码提供；**内核插件与用户插件由使用方自行编写**（fork 定制者写 Rust 内核插件 / sl-agent 扩展者写 Rune 脚本）。Rust 2024 edition；仓库为 Cargo workspace（ADR-0008，P3 落地），P3 前保持单 crate。主交付是业务无关的通用 Agent API 服务（二进制 `sl-agent`，HTTP/WS；**前后端分离**——官方参考前端 = `frontend/` React 工程，ADR-0010）与 Rune 脚本用户插件路径，内核能力仅由维护者编译进官方二进制（Linus 模式，见 [docs/adr/0006](docs/adr/0006-pivot-harness-and-rune.md)）。mistake-agent 是本仓库的参考实现（保持独立二进制，见 [docs/adr/0001](docs/adr/0001-independent-repo-skip-m1.md)）。基于本项目开发自己的 Agent 见 [docs/agent-dev-guide.md](docs/agent-dev-guide.md)。
 
 ## 文档启动流程（每次开始工作前执行）
 

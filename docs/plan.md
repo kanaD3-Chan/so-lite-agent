@@ -4,7 +4,8 @@
 >
 > 状态：**M2–M4 已落地**（2026-08-07 评审通过）；**pivot 取代 M5 冻结计划**
 > （2026-08-13，ADR-0006）：定位从 crate lib 转向**业务无关的通用 Agent 可执行文件**
-> （二进制 `sl-agent`，浏览器 Web 应用形态：HTTP/WS + 内嵌前端）；内核插件 = **Linus 模式**
+> （二进制 `sl-agent`，HTTP/WS API 服务；**前后端分离**，官方参考前端 = `frontend/`
+> React 工程，ADR-0010）；内核插件 = **Linus 模式**
 > （仅维护者编译进官方二进制，无动态内核扩展）；用户插件 = **Rune 脚本**（eBPF 模型：
 > 安全 VM + requires 函数白名单）；能力 seam 化，内核/用户插件创新不变。
 >
@@ -100,8 +101,11 @@ requires 句柄）端到端注册并调用；AgentLoop trait 化后默认实现�
   Rune 脚本不直接实现（脚本无具体类型），观察需求经 `Event::Custom` 上浮；
 - 不可信插件加固（后续项）：`session_read` 越权收窄（多会话场景）、emit_event/log
   洪泛配额——单机单用户场景可接受，多用户/多租户由下游在服务层控制；
-- GUI 长全：流式输出、会话列表、工具调用面板（事件/RPC 走 WS）；前端工程化（Vue/TS）
-  在此阶段或 P3 定夺；
+- **GUI（✅ 已落地：前后端分离 + React 参考实现，ADR-0010）**：sl-agent 纯 API
+  服务（/ws + /healthz，无静态服务）；`frontend/` React + TS 参考前端——聊天流式
+  （message_delta/reasoning_delta）、会话列表（list_sessions/read_session）、工具面板
+  （ToolStart/Progress/End 聚合）、断线重连；`VITE_SL_AGENT_WS` 注入后端地址；
+  协议契约在 `frontend/src/protocol.ts`；fork/自建前端连同一 WS 协议、技术栈自选；
 - 插件手册 Rune 路径与 examples 脚本插件示例已在 P1 落地。
 
 ## P3：分发形态评估（评估项）

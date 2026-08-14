@@ -1,29 +1,28 @@
-//! `sl-agent`：业务无关的通用 Agent 可执行文件（浏览器 Web 应用形态，ADR-0006）。
+//! `sl-agent`：业务无关的通用 Agent 可执行文件（API 服务形态，ADR-0006/0010）。
 //!
-//! HTTP/WS 服务 + 内嵌前端（`web/`，rust-embed），单二进制分发；模型默认 mock
-//! （零配置 hello 回合），经环境变量接真实 OpenAI 兼容端点；Rune 脚本用户插件
-//! 从 `--plugins` 目录加载（一插件一目录：manifest.json + plugin.rn）。
+//! **前后端分离（ADR-0010）**：sl-agent 只提供 HTTP/WS API（无静态服务、无内嵌前端）；
+//! 前端是独立 React 工程（`frontend/`），自己起 dev server 或静态托管，经 WS 连本服务。
+//! 模型默认 mock（零配置 hello 回合），经环境变量接真实 OpenAI 兼容端点；
+//! Rune 脚本用户插件从 `--plugins` 目录加载（一插件一目录：manifest.json + plugin.rn）。
 //!
 //! 运行：`cargo run --bin sl-agent --features server,rune-plugins`
 //!
 //! 环境变量：`SL_AGENT_PORT`（默认 8080）、`SL_AGENT_PLUGINS_DIR`（默认 `./plugins`）、
 //! `SL_AGENT_API_URL` / `SL_AGENT_API_KEY` / `SL_AGENT_MODEL`（可选，配了接真实模型）。
+//! 前端连 `ws://127.0.0.1:8080/ws`（Vite dev 见 `frontend/README`）。
 
 #![cfg(feature = "server")]
 
 mod ws;
 
 use std::net::SocketAddr;
+#[cfg(feature = "rune-plugins")]
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
 
 use axum::Router;
-use axum::extract::State;
-use axum::http::{StatusCode, header};
-use axum::response::{IntoResponse, Response};
 use axum::routing::get;
-use rust_embed::RustEmbed;
 use so_lite_agent::audit::{Auditor, MemoryAuditSink};
 use so_lite_agent::builder::KernelBuilder;
 use so_lite_agent::model::{
@@ -33,11 +32,6 @@ use so_lite_agent::model::{
 use so_lite_agent::services::ServiceHandles;
 
 use self::ws::{AppState, WsHub};
-
-/// 内嵌前端资源（`web/`，构建期打包进二进制）。
-#[derive(RustEmbed)]
-#[folder = "web/"]
-struct WebAssets;
 
 fn main() {
     // env 配置读取失败只告警不退出：mock 模型 + 默认端口也能跑 hello。
@@ -60,7 +54,6 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
         .ok()
         .and_then(|v| v.parse().ok())
         .unwrap_or(8080);
-    let plugins_dir = std::env::var("SL_AGENT_PLUGINS_DIR").unwrap_or_else(|_| "./plugins".into());
     let data_dir = std::env::var("SL_AGENT_DATA_DIR").unwrap_or_else(|_| "./data".into());
 
     // ---- 会话持久化：JSONL 事件日志落盘（ADR-0007 第二步，sl-agent 默认启用）----
@@ -109,6 +102,8 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
     // ---- Rune 脚本用户插件目录（一插件一目录，失败只告警单个插件）----
     #[cfg(feature = "rune-plugins")]
     {
+        let plugins_dir =
+            std::env::var("SL_AGENT_PLUGINS_DIR").unwrap_or_else(|_| "./plugins".into());
         let dir = PathBuf::from(&plugins_dir);
         if dir.is_dir() {
             for entry in std::fs::read_dir(&dir)? {
@@ -136,48 +131,21 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
     });
     let _ = hub_rx;
 
-    // ---- HTTP 路由：静态（内嵌前端）+ /ws + /healthz ----
+    // ---- HTTP 路由：仅 API（/ws + /healthz）；前端独立部署（ADR-0010）----
     let app = Router::new()
         .route("/ws", get(ws::ws_upgrade))
         .route("/healthz", get(healthz))
-        .fallback(static_handler)
         .with_state(state);
 
     let addr = SocketAddr::from(([127, 0, 0, 1], port));
     let listener = tokio::net::TcpListener::bind(addr).await?;
-    log::info!("sl-agent 已启动：http://{addr}（打开浏览器即可对话）");
+    log::info!("sl-agent API 已启动：http://{addr}（WS: /ws；前端独立运行，见 frontend/README）");
     axum::serve(listener, app).await?;
     Ok(())
 }
 
 async fn healthz() -> axum::Json<serde_json::Value> {
     axum::Json(serde_json::json!({ "ok": true }))
-}
-
-/// 静态资源：内嵌前端（rust-embed），按扩展名给 MIME。
-async fn static_handler(State(_state): State<Arc<AppState>>, uri: axum::http::Uri) -> Response {
-    let path = uri.path().trim_start_matches('/');
-    let path = if path.is_empty() { "index.html" } else { path };
-    match WebAssets::get(path) {
-        Some(content) => {
-            let mime = mime_for(path);
-            ([(header::CONTENT_TYPE, mime)], content.data).into_response()
-        }
-        None => (StatusCode::NOT_FOUND, "not found").into_response(),
-    }
-}
-
-fn mime_for(path: &str) -> &'static str {
-    let ext = path.rsplit('.').next().unwrap_or("");
-    match ext {
-        "html" => "text/html; charset=utf-8",
-        "js" | "mjs" => "application/javascript; charset=utf-8",
-        "css" => "text/css; charset=utf-8",
-        "svg" => "image/svg+xml",
-        "png" => "image/png",
-        "json" => "application/json",
-        _ => "application/octet-stream",
-    }
 }
 
 #[cfg(test)]
@@ -205,7 +173,6 @@ mod tests {
         let app = Router::new()
             .route("/ws", get(ws::ws_upgrade))
             .route("/healthz", get(healthz))
-            .fallback(static_handler)
             .with_state(state);
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let addr = listener.local_addr().unwrap();
@@ -228,12 +195,15 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn index_served() {
+    async fn root_is_api_only() {
+        // 前后端分离（ADR-0010）：sl-agent 不提供静态页，根路径应 404。
         let base = serve().await;
         let resp = reqwest::get(&base).await.unwrap();
-        assert!(resp.status().is_success());
-        let body = resp.text().await.unwrap();
-        assert!(body.contains("sl-agent"), "首页应包含 sl-agent：{body}");
+        assert!(
+            resp.status().is_client_error() || resp.status().is_server_error(),
+            "API 服务不应提供静态页：{}",
+            resp.status()
+        );
     }
 
     #[tokio::test]
