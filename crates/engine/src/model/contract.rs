@@ -63,12 +63,18 @@ pub enum ToolChoice {
     },
 }
 
-/// 模型可见工具（wire name + JSON Schema）。
+/// 模型可见工具（wire name + JSON Schema + GUI 展示元数据）。
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ToolSchema {
     pub name: String,
     pub description: String,
     pub input_schema: serde_json::Value,
+    /// 用户友好显示名（GUI 工具面板展示；缺省回退 name）。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub title: Option<String>,
+    /// Iconify 图标名（如 "mdi:lightbulb-on-outline"，GUI 展示用）。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub icon: Option<String>,
 }
 
 #[derive(Debug, Clone)]

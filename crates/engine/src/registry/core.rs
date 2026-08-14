@@ -366,6 +366,8 @@ impl Registry {
                         name: full_to_wire(&full_name(&e.info.namespace, &t.name)),
                         description: t.description.clone(),
                         input_schema: serde_json::to_value(&t.params).unwrap_or_default(),
+                        title: t.title.clone(),
+                        icon: t.icon.clone(),
                     });
                 }
             }
