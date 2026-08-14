@@ -21,7 +21,7 @@
 //! 区间并把区间后首节点重定向到新节点；从任意末端沿 prev 回溯即得候选链
 //! （多条 replace 遮蔽同一段 → 多条候选链，`active_path` 选一条末端）。
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Mutex};
 
 use async_trait::async_trait;
@@ -134,6 +134,13 @@ pub trait SessionStore: Send + Sync {
     ) -> Result<(), SessionError>;
     /// 全量日志 → 消息（append 顺序，含被遮蔽；人读 transcript 用）。
     async fn read_all(&self, key: &SessionKey) -> Result<Vec<Message>, SessionError>;
+    /// 全量时间线（**逻辑顺序**，前端完整渲染用）：压缩摘要节点前插到其被压缩
+    /// 段之后（`timeline_messages`），其余消息保持日志顺序——遮蔽不删除，
+    /// 历史不可因压缩而消失。缺省 = 日志顺序（无压缩事件的存储保持原行为）。
+    async fn read_timeline(&self, key: &SessionKey) -> Result<Vec<Message>, SessionError> {
+        let events = self.read_events(key).await?;
+        Ok(timeline_messages(&events))
+    }
     /// 消息 id → 事件 seq（编辑 / 切换分支前定位）。
     async fn resolve_seq(
         &self,
@@ -152,6 +159,53 @@ pub trait SessionStore: Send + Sync {
 
 /// 会话服务句柄：内核插件 / kernel 持有的完整视图。
 pub type SessionHandle = Arc<dyn SessionStore>;
+
+// ---------------------------------------------------------------------------
+// 全量时间线（逻辑顺序）：压缩摘要节点前插到其被压缩段之后（前端完整渲染用）
+// ---------------------------------------------------------------------------
+
+/// 压缩摘要节点判别（与 agent loop `compact_now` 写入的前缀一致）。
+pub fn is_compaction_summary(ev: &SessionEvent) -> bool {
+    matches!(
+        &ev.message.kind,
+        MessageKind::System { text, .. } if text.starts_with("上下文压缩摘要：")
+    ) && matches!(ev.surface_op, Some(SurfaceOp::Replace { .. }))
+}
+
+/// 事件日志 → 全量时间线消息（逻辑顺序）：每个压缩摘要节点插到其被压缩段
+/// （`source_event_seqs`）末尾之后；其余消息保持日志顺序。遮蔽不删除——被压
+/// 缩的历史仍完整出现在时间线中（铁律：历史不可因压缩而消失）。
+pub fn timeline_messages(events: &[SessionEvent]) -> Vec<Message> {
+    // 被压缩段末尾 seq → 紧随其后的摘要事件 seq（多摘要同段末尾时按序展开）。
+    let mut summary_after: HashMap<u64, Vec<u64>> = HashMap::new();
+    for ev in events {
+        if is_compaction_summary(ev)
+            && let Some(&last) = ev.source_event_seqs.last()
+        {
+            summary_after.entry(last).or_default().push(ev.seq);
+        }
+    }
+    let by_seq: HashMap<u64, &SessionEvent> = events.iter().map(|e| (e.seq, e)).collect();
+    let mut out: Vec<Message> = Vec::with_capacity(events.len());
+    let mut emitted: HashSet<u64> = HashSet::new();
+    for ev in events {
+        if !emitted.insert(ev.seq) {
+            continue;
+        }
+        out.push(ev.message.clone());
+        // 该 seq 是某摘要被压缩段的末尾 → 摘要节点紧随其后（压缩点位置）。
+        if let Some(sums) = summary_after.get(&ev.seq) {
+            for s in sums {
+                if emitted.insert(*s)
+                    && let Some(sum) = by_seq.get(s)
+                {
+                    out.push(sum.message.clone());
+                }
+            }
+        }
+    }
+    out
+}
 
 // ---------------------------------------------------------------------------
 // 投影：surface 折叠 + 遮蔽链回溯（参考 DSH `foldSurface` / `SurfaceManager`）
@@ -740,5 +794,87 @@ mod tests {
             }
             _ => panic!("应为 user 消息"),
         }
+    }
+
+    #[test]
+    fn timeline_messages_places_summary_after_compacted_segment() {
+        let now = chrono::Utc::now();
+        let mut events: Vec<SessionEvent> = (0..6)
+            .map(|i| SessionEvent {
+                seq: i,
+                message: user(&format!("m{i}")),
+                surface_op: Some(SurfaceOp::Append),
+                source_event_seqs: Vec::new(),
+                created_at: now,
+            })
+            .collect();
+        // 压缩事件：seq 6 遮蔽 0..3（source = [0,1,2,3]），尾部 = m4, m5。
+        let mut summary = SessionEvent::new(
+            Message::system("上下文压缩摘要：前四条被压缩"),
+            SurfaceOp::Replace { start: 0, end: 3 },
+        );
+        summary.seq = 6;
+        summary.source_event_seqs = vec![0, 1, 2, 3];
+        summary.created_at = now;
+        events.push(summary);
+
+        let timeline = timeline_messages(&events);
+        assert_eq!(timeline.len(), 7, "历史不因压缩而消失");
+        // 顺序：m0..m3, 摘要, m4, m5。
+        for (i, msg) in timeline.iter().enumerate().take(4) {
+            assert!(
+                matches!(&msg.kind, MessageKind::User { text, .. } if text == &format!("m{i}")),
+                "索引 {i} 应为被压缩段消息"
+            );
+        }
+        assert!(
+            matches!(&timeline[4].kind, MessageKind::System { text, .. } if text.contains("上下文压缩摘要")),
+            "摘要节点应插到被压缩段之后"
+        );
+        assert!(matches!(&timeline[5].kind, MessageKind::User { text, .. } if text == "m4"));
+        assert!(matches!(&timeline[6].kind, MessageKind::User { text, .. } if text == "m5"));
+    }
+
+    #[test]
+    fn timeline_messages_nests_multiple_summaries() {
+        let now = chrono::Utc::now();
+        let mut events: Vec<SessionEvent> = (0..5)
+            .map(|i| SessionEvent {
+                seq: i,
+                message: user(&format!("m{i}")),
+                surface_op: Some(SurfaceOp::Append),
+                source_event_seqs: Vec::new(),
+                created_at: now,
+            })
+            .collect();
+        // 第一次压缩：seq 5 遮蔽 [0,1]。
+        let mut s1 = SessionEvent::new(
+            Message::system("上下文压缩摘要：一"),
+            SurfaceOp::Replace { start: 0, end: 1 },
+        );
+        s1.seq = 5;
+        s1.source_event_seqs = vec![0, 1];
+        s1.created_at = now;
+        events.push(s1);
+        // 第二次压缩：seq 6 遮蔽 surface [0,1,5,2,3]（source = [0,1,5,2,3]）。
+        let mut s2 = SessionEvent::new(
+            Message::system("上下文压缩摘要：二"),
+            SurfaceOp::Replace { start: 0, end: 3 },
+        );
+        s2.seq = 6;
+        s2.source_event_seqs = vec![0, 1, 5, 2, 3];
+        s2.created_at = now;
+        events.push(s2);
+
+        let timeline = timeline_messages(&events);
+        // 顺序：m0, m1, S1, m2, m3, S2, m4。
+        assert_eq!(timeline.len(), 7);
+        assert!(
+            matches!(&timeline[2].kind, MessageKind::System { text, .. } if text.contains("：一"))
+        );
+        assert!(
+            matches!(&timeline[5].kind, MessageKind::System { text, .. } if text.contains("：二"))
+        );
+        assert!(matches!(&timeline[6].kind, MessageKind::User { text, .. } if text == "m4"));
     }
 }

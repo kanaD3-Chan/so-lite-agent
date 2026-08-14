@@ -556,7 +556,8 @@ impl Kernel {
     /// 前端据此构建树视图 + < / > 分支导航，mistake-agent read_session 同款）；
     /// 活跃链（模型上下文）另经 `read_path` 获得。
     pub async fn read_session(&self, key: &SessionKey) -> Result<Vec<Message>, LoopError> {
-        self.store.read_all(key).await.map_err(session_err)
+        // 逻辑时间线顺序：压缩摘要节点前插到压缩点，历史完整（遮蔽不删除）。
+        self.store.read_timeline(key).await.map_err(session_err)
     }
 
     /// 用户可见工具列表（wire name；GUI 工具目录数据源，mistake-agent 同款：
