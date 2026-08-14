@@ -2,7 +2,8 @@
 //!
 //! 停止条件：模型自然停止 / 工具调用上限（默认 25）/ 相同失败连续 N 次（默认 3）/
 //! 单轮总超时 / 用户取消。系统提示由注入的 provider 生成（不落消息树，
-//! 每轮请求重新注入）。上下文压缩在回合边界按 75% 阈值触发。
+//! 每轮请求重新注入）。上下文压缩：回合边界按 75% 阈值自动触发，或回合内
+//! `context::compact` 工具手动触发（立即生效，同回合后续请求即见压缩后上下文）。
 //!
 //! Capability seam（ADR-0006）：本类型是 [`super::AgentLoop`] trait 的默认
 //! **Provider** 实现；kernel 只依赖 `Arc<dyn AgentLoop>`，经
@@ -150,6 +151,9 @@ impl DefaultAgentLoop {
         let mut consecutive_failures = 0usize;
         let mut last_code: Option<ToolErrorCode> = None;
         let mut remaining_forced = input.forced_tool.clone();
+        // 回合内手动压缩（context::compact 工具）的压缩信息：并入 TurnOutcome
+        // 走存储 splice 管线；回合末存在时不重复跑自动阈值压缩。
+        let mut manual_compaction: Option<CompactionInfo> = None;
         let mut turn_usage = TokenUsage::default();
         // 强制调用回合全程关闭思考模式：部分 API 要求 thinking 的
         // reasoning_text 必须随历史回传，混用 none/thinking 会协议报错。
@@ -463,6 +467,34 @@ impl DefaultAgentLoop {
                         }
                         None => Err(ToolError::handler("会话切换不可用")),
                     }
+                } else if full_name == "context::compact" {
+                    // 手动压缩上下文：立即执行，同回合后续模型请求即见压缩后
+                    // 上下文。调用消息照常落时间线（与 session::switch 控制消息
+                    // 不落树不同——压缩是用户可见的真实事件）。
+                    // 链长 < keep_last + 5 时 no-op：前缀太短压缩无意义，防模型
+                    // 反复调用烧摘要 token。
+                    if conversation.len() < self.compaction_keep_last + 5 {
+                        Ok(json!({
+                            "compacted": false,
+                            "reason": "上下文很短，无需压缩",
+                        }))
+                    } else {
+                        match self.compact_now(&mut conversation).await {
+                            Some(info) => {
+                                let summarized = info.summarized;
+                                manual_compaction = Some(info);
+                                Ok(json!({
+                                    "compacted": true,
+                                    "summarized": summarized,
+                                    "kept_last": self.compaction_keep_last,
+                                }))
+                            }
+                            None => Ok(json!({
+                                "compacted": false,
+                                "reason": "摘要生成失败，下回合再试",
+                            })),
+                        }
+                    }
                 } else {
                     self.dispatch
                         .call_tool(&full_name, params.clone(), Caller::Model)
@@ -509,7 +541,20 @@ impl DefaultAgentLoop {
             }
         };
 
-        let compaction = self.maybe_compact(&mut conversation).await;
+        // 手动压缩优先：回合内已手动压缩则不重复跑自动阈值压缩（链已收缩；
+        // 同一回合只允许一个 CompactionInfo 走存储 splice 管线）。手动压缩的
+        // 链尾推进到回合真实末条——压缩后追加的消息（compact 调用气泡、后续
+        // 回复）必须留在活跃路径上。
+        if let Some(info) = manual_compaction.as_mut()
+            && let Some(last) = conversation.last()
+        {
+            info.tail_end = last.id;
+        }
+        let compaction = if manual_compaction.is_some() {
+            manual_compaction.take()
+        } else {
+            self.maybe_compact(&mut conversation).await
+        };
         let outcome = TurnOutcome {
             messages: new_messages(&conversation, &preexisting),
             stop_reason,
@@ -530,14 +575,22 @@ impl DefaultAgentLoop {
         Ok(outcome)
     }
 
-    /// 上下文用量 ≥ 窗口 75% 时压缩：最近 N 条不压，其余交给摘要器；
-    /// 摘要为空则重试一次，仍失败就下回合再试（原始消息仍在会话存储）。
+    /// 上下文用量 ≥ 窗口 75% 时压缩（回合边界自动触发）。
     async fn maybe_compact(&self, conversation: &mut Vec<Message>) -> Option<CompactionInfo> {
         let total_chars: usize = conversation.iter().map(message_chars).sum();
         let est_tokens = total_chars / 2 + 1;
         if est_tokens < self.context_limit_tokens * 3 / 4 {
             return None;
         }
+        self.compact_now(conversation).await
+    }
+
+    /// 立即压缩（无阈值判断）：最近 N 条不压，其余交给摘要器；
+    /// 摘要为空则重试一次，仍失败返回 None（原始消息仍在会话存储）。
+    /// 手动压缩（context::compact 工具）回合内调用——同回合后续模型请求
+    /// 即见压缩后上下文；压缩信息经 TurnOutcome.compaction 走既有存储
+    /// splice 管线（mistake-agent 同款，AGPL 注明来源）。
+    async fn compact_now(&self, conversation: &mut Vec<Message>) -> Option<CompactionInfo> {
         let keep_from = conversation.len().saturating_sub(self.compaction_keep_last);
         if keep_from == 0 {
             return None;

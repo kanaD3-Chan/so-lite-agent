@@ -11,7 +11,7 @@ use crate::agent::session::{Goal, SessionKey, SessionMeta, SessionSwitch, Summar
 use crate::audit::{Auditor, MemoryAuditSink};
 use crate::contract::{CallerPolicy, Info};
 use crate::events::MemoryEventSink;
-use crate::message::Message;
+use crate::message::{Message, MessageKind};
 use crate::model::{
     AbortSignal, ItemKind, ModelChunk, ModelError, ModelHandle, ModelRequest, ModelService,
     ModelStream,
@@ -190,6 +190,120 @@ async fn builder_wires_session_switch_hook() {
         switched.lock().expect("switched poisoned").len(),
         1,
         "注入的切换钩子应被 loop 调用"
+    );
+}
+
+#[tokio::test]
+async fn context_compact_tool_compacts_immediately_and_keeps_history() {
+    // 会话既有 6 条历史消息；回合内模型调用 context::compact 手动压缩
+    // （keep_last=2），压缩后追加 compact 调用气泡与助手回复——全部应落盘，
+    // 历史不因压缩消失；活跃路径推进到回合真实末条。
+    let counted = Arc::new(AtomicUsize::new(0));
+    let store = Arc::new(InMemorySessionStore::default());
+    let key = SessionKey::new();
+    store
+        .create_session(&key, &SessionMeta::new(key))
+        .await
+        .unwrap();
+    for i in 0..6 {
+        store
+            .append_event(
+                &key,
+                SessionEvent::new(Message::user(format!("历史消息 {i}")), SurfaceOp::Append),
+            )
+            .await
+            .unwrap();
+    }
+
+    let auditor = Auditor::new(Arc::new(MemoryAuditSink::default()));
+    let handles = ServiceHandles::default()
+        .with_session(store.clone())
+        .with_model(ModelHandle::new(
+            Arc::new(SequenceModel::new(vec![
+                vec![
+                    Ok(ModelChunk::ToolCallStart {
+                        index: 0,
+                        call_id: "compact_1".into(),
+                        name: "context__compact".into(),
+                    }),
+                    Ok(ModelChunk::ToolCallDelta {
+                        index: 0,
+                        data: "{}".into(),
+                    }),
+                    Ok(ModelChunk::ItemDone {
+                        kind: ItemKind::FunctionCall,
+                    }),
+                    Ok(ModelChunk::Done),
+                ],
+                text_chunks("已压缩。"),
+            ])),
+            Duration::from_secs(30),
+            auditor,
+        ));
+
+    let kernel = KernelBuilder::new()
+        .event_sink(Arc::new(MemoryEventSink::default()))
+        .service_handles(handles)
+        .summarizer(Arc::new(CountingSummarizer(counted.clone())))
+        .compaction_keep_last(2)
+        .register_plugin(PluginDescriptor {
+            info: Info {
+                namespace: "context".into(),
+                enabled: true,
+                tools: vec![tool_def(
+                    "compact",
+                    "压缩上下文",
+                    CallerPolicy::UserAndModel,
+                )],
+                ..Default::default()
+            },
+            register: |ctx| {
+                ctx.registrar.tool(
+                    "compact",
+                    Arc::new(|_ctx: &ToolCallContext, _params: Value| {
+                        Box::pin(async move { Ok(serde_json::json!({ "compacted": false })) })
+                    }),
+                )
+            },
+        })
+        .build()
+        .unwrap();
+
+    let outcome = kernel
+        .send_user_message(key, "帮我压缩一下上下文")
+        .await
+        .unwrap();
+    assert!(outcome.compaction.is_some(), "手动压缩应产出压缩信息");
+    assert!(counted.load(Ordering::SeqCst) > 0, "摘要器应被调用");
+
+    // 事件全量：6 历史 + 1 用户 + 摘要 + compact 调用气泡 + 助手回复 = 10。
+    let all = store.read_all(&key).await.unwrap();
+    assert_eq!(all.len(), 10, "历史消息不因压缩而消失");
+    assert!(
+        all.iter().any(|m| matches!(
+            &m.kind,
+            MessageKind::System { text, .. } if text.contains("上下文压缩摘要")
+        )),
+        "摘要节点应落盘"
+    );
+    assert!(
+        all.iter().any(|m| matches!(
+            &m.kind,
+            MessageKind::ToolCall { entry, .. } if entry == "context::compact"
+        )),
+        "compact 调用消息应如实落时间线"
+    );
+
+    // 活跃链 = 摘要 + 保留 2 条 + compact 气泡 + 助手回复（压缩后消息不丢）。
+    let path = store.read_path(&key).await.unwrap();
+    assert_eq!(path.len(), 5, "活跃路径应推进到回合真实末条");
+    assert!(
+        matches!(&path[0].kind, MessageKind::System { text, .. } if text.contains("上下文压缩摘要")),
+        "活跃链应以摘要节点开头"
+    );
+    assert!(
+        matches!(&path.last().unwrap().kind, MessageKind::Assistant { .. }),
+        "活跃链末条应是压缩后的助手回复"
     );
 }
 
