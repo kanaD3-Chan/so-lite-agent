@@ -166,7 +166,8 @@ async fn edit_message_derives_branch() {
     // 与被遮蔽历史仍在（< / > 可切回），活跃链 = 改后的问题。
     assert_eq!(all.len(), 3, "全量树：原 user + assistant + 编辑后的 user");
     assert!(
-        all.iter().any(|m| matches!(&m.kind, MessageKind::User { text, .. } if text == "改后的问题")),
+        all.iter()
+            .any(|m| matches!(&m.kind, MessageKind::User { text, .. } if text == "改后的问题")),
         "编辑后的 user 在全量树中"
     );
 }

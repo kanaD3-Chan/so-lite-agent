@@ -204,7 +204,11 @@ impl Kernel {
         *self.active.lock().expect("active poisoned") = None;
         let outcome = outcome?;
 
-        // 追加本回合新增消息（assistant / reasoning / tool 均为 append）。
+        // 追加本回合新增消息（assistant / reasoning / tool 均为 append）；
+        // 记录末条消息 id——活跃路径推进到回合末（mistake-agent 消息树分支语义：
+        // active_path 指向链尾，否则 read_path 停在最后一条 user，树内分叉会挂错点、
+        // 前端树视图回溯断链）。
+        let mut persisted_last: Option<MessageId> = None;
         for msg in &outcome.messages {
             let op = match &msg.kind {
                 MessageKind::System { .. } => {
@@ -213,10 +217,12 @@ impl Kernel {
                 }
                 _ => SurfaceOp::Append,
             };
-            self.store
+            let stored = self
+                .store
                 .append_event(&effective_key, SessionEvent::new(msg.clone(), op))
                 .await
                 .map_err(session_err)?;
+            persisted_last = Some(stored.message.id);
         }
         if let Some(info) = &outcome.compaction {
             // 压缩 = 追加 summary 事件，replace 遮蔽被压段（ADR-0007）。
@@ -259,6 +265,17 @@ impl Kernel {
                 session: effective_key.to_string(),
                 summarized: info.summarized,
             });
+        }
+        // 活跃路径推进到回合末条（mistake-agent 消息树分支语义：compaction 用
+        // tail_end，否则用末条落盘消息；回合末决策（on_turn_end）若 start_new
+        // 分叉会再推进到摘要节点）。
+        if outcome.compaction.is_none()
+            && let Some(last) = persisted_last
+        {
+            self.store
+                .set_active_path(&effective_key, Some(last))
+                .await
+                .map_err(session_err)?;
         }
         // 回合末会话调度决策（continue / update_goal / start_new，失败静默降级
         // continue——存疑即继续，mistake-agent ADR-0030）。
