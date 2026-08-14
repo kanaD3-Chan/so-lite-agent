@@ -213,6 +213,9 @@ fn reasoning_item(id: &str, text: &str) -> Value {
 /// 内部 Message 树 → Chat Completions messages（附件内联数据时转 image_url base64）。
 pub(crate) fn messages_to_cc(messages: &[Message]) -> Vec<Value> {
     let mut out = Vec::new();
+    // DeepSeek 兼容端点（opencode 等）要求 thinking 模式下回传 reasoning_content：
+    // 累积上一轮的思维链，合并进下一条 assistant 消息。
+    let mut pending_reasoning: Option<String> = None;
     for msg in messages {
         match &msg.kind {
             MessageKind::User {
@@ -237,13 +240,25 @@ pub(crate) fn messages_to_cc(messages: &[Message]) -> Vec<Value> {
                 out.push(json!({"role": "user", "content": content}));
             }
             MessageKind::Assistant { text } => {
-                out.push(json!({"role": "assistant", "content": text}));
+                let mut m = json!({"role": "assistant", "content": text});
+                if let Some(r) = pending_reasoning.take() {
+                    m["reasoning_content"] = json!(r);
+                }
+                out.push(m);
             }
             MessageKind::System { text } => {
                 out.push(json!({"role": "system", "content": text}));
             }
-            // Chat Completions 无 reasoning 概念：忽略。
-            MessageKind::Reasoning { .. } => {}
+            MessageKind::Reasoning { text, .. } => {
+                // 累积思维链，随下一条 assistant 消息回传（thinking 模式要求）。
+                pending_reasoning = Some(match pending_reasoning.take() {
+                    Some(mut p) => {
+                        p.push_str(text);
+                        p
+                    }
+                    None => text.clone(),
+                });
+            }
             MessageKind::ToolCall {
                 entry,
                 params,
@@ -256,7 +271,7 @@ pub(crate) fn messages_to_cc(messages: &[Message]) -> Vec<Value> {
                     call_id.clone()
                 };
                 let arguments = serde_json::to_string(params).unwrap_or_else(|_| "{}".into());
-                out.push(json!({
+                let mut call_msg = json!({
                     "role": "assistant",
                     "content": null,
                     "tool_calls": [{
@@ -267,7 +282,11 @@ pub(crate) fn messages_to_cc(messages: &[Message]) -> Vec<Value> {
                             "arguments": arguments,
                         },
                     }],
-                }));
+                });
+                if let Some(r) = pending_reasoning.take() {
+                    call_msg["reasoning_content"] = json!(r);
+                }
+                out.push(call_msg);
                 let output = match result {
                     Ok(v) => serde_json::to_string(v).unwrap_or_else(|_| "{}".into()),
                     Err(e) => {
