@@ -308,3 +308,172 @@ async fn jsonl_store_full_turn_persists_and_restores() {
         crate::message::MessageKind::User { text, .. } if text == "改后的问题"
     ));
 }
+
+// ---------- 事件决策分离（P2）：LoopHook ----------
+
+struct DenyEchoHook {
+    denied: Arc<Mutex<Vec<String>>>,
+}
+
+#[async_trait]
+impl crate::agent::r#loop::LoopHook for DenyEchoHook {
+    async fn before_tool(&self, entry: &str, _params: &Value) -> crate::agent::r#loop::ToolVerdict {
+        if entry == "demo::echo" {
+            self.denied
+                .lock()
+                .expect("denied poisoned")
+                .push(entry.into());
+            crate::agent::r#loop::ToolVerdict::Deny("demo::echo 已被 hook 拒绝".into())
+        } else {
+            crate::agent::r#loop::ToolVerdict::Allow(None)
+        }
+    }
+}
+
+struct RewriteEchoHook;
+
+#[async_trait]
+impl crate::agent::r#loop::LoopHook for RewriteEchoHook {
+    async fn before_tool(&self, entry: &str, _params: &Value) -> crate::agent::r#loop::ToolVerdict {
+        if entry == "demo::echo" {
+            crate::agent::r#loop::ToolVerdict::Allow(Some(json!({ "text": "改写后的参数" })))
+        } else {
+            crate::agent::r#loop::ToolVerdict::Allow(None)
+        }
+    }
+}
+
+struct ObserveHook {
+    after: Arc<Mutex<Vec<String>>>,
+    stops: Arc<Mutex<Vec<String>>>,
+}
+
+#[async_trait]
+impl crate::agent::r#loop::LoopHook for ObserveHook {
+    async fn after_tool(&self, entry: &str, _result: &Result<Value, crate::contract::ToolError>) {
+        self.after
+            .lock()
+            .expect("after poisoned")
+            .push(entry.into());
+    }
+    async fn turn_stopping(&self, stop: &StopReason) {
+        self.stops
+            .lock()
+            .expect("stops poisoned")
+            .push(format!("{stop:?}"));
+    }
+}
+
+/// 组装带 demo::echo 工具 + hook 的 kernel；模型先调工具、后文本收尾。
+async fn kernel_with_hooks(hooks: Vec<Arc<dyn crate::agent::r#loop::LoopHook>>) -> Kernel {
+    let auditor = Auditor::new(Arc::new(MemoryAuditSink::default()));
+    let handles = ServiceHandles::default().with_model(ModelHandle::new(
+        Arc::new(SequenceModel::new(vec![
+            vec![
+                Ok(ModelChunk::ToolCallStart {
+                    index: 0,
+                    call_id: "call_echo".into(),
+                    name: "demo__echo".into(),
+                }),
+                Ok(ModelChunk::ToolCallDelta {
+                    index: 0,
+                    data: r#"{"text":"原始参数"}"#.into(),
+                }),
+                Ok(ModelChunk::ItemDone {
+                    kind: ItemKind::FunctionCall,
+                }),
+                Ok(ModelChunk::Done),
+            ],
+            text_chunks("已完成。"),
+        ])),
+        Duration::from_secs(30),
+        auditor,
+    ));
+    let mut builder = KernelBuilder::new()
+        .event_sink(Arc::new(MemoryEventSink::default()))
+        .service_handles(handles)
+        .register_plugin(PluginDescriptor {
+            info: Info {
+                namespace: "demo".into(),
+                enabled: true,
+                tools: vec![tool_def("echo", "回显", CallerPolicy::UserAndModel)],
+                ..Default::default()
+            },
+            register: |ctx| {
+                ctx.registrar.tool(
+                    "echo",
+                    Arc::new(|_ctx: &ToolCallContext, params: Value| {
+                        Box::pin(async move { Ok(json!({ "echo": params["text"] })) })
+                    }),
+                )
+            },
+        });
+    for hook in hooks {
+        builder = builder.loop_hook(hook);
+    }
+    builder.build().unwrap()
+}
+
+#[tokio::test]
+async fn hook_denies_tool_and_keeps_history() {
+    let denied = Arc::new(Mutex::new(Vec::new()));
+    let kernel = kernel_with_hooks(vec![Arc::new(DenyEchoHook {
+        denied: denied.clone(),
+    })])
+    .await;
+    let outcome = kernel
+        .send_user_message(Default::default(), "调用 echo")
+        .await
+        .unwrap();
+    assert_eq!(
+        denied.lock().expect("denied poisoned").len(),
+        1,
+        "hook 应拒绝工具"
+    );
+    // tool_calls 计模型请求数（含被拒的）；核心验证：拒绝结果作为工具错误落回。
+    assert!(outcome.tool_calls >= 1);
+    // 拒绝结果作为工具错误消息落回（模型可见）。
+    assert!(outcome.messages.iter().any(|m| matches!(
+        &m.kind,
+        crate::message::MessageKind::ToolCall { result: Err(_), .. }
+    )));
+}
+
+#[tokio::test]
+async fn hook_rewrites_params() {
+    let kernel = kernel_with_hooks(vec![Arc::new(RewriteEchoHook)]).await;
+    let outcome = kernel
+        .send_user_message(Default::default(), "调用 echo")
+        .await
+        .unwrap();
+    assert_eq!(outcome.tool_calls, 1);
+    assert!(outcome.messages.iter().any(|m| matches!(
+        &m.kind,
+        crate::message::MessageKind::ToolCall { result: Ok(v), .. } if v["echo"] == "改写后的参数"
+    )));
+}
+
+#[tokio::test]
+async fn hooks_observe_after_tool_and_turn_stopping() {
+    let after = Arc::new(Mutex::new(Vec::new()));
+    let stops = Arc::new(Mutex::new(Vec::new()));
+    let kernel = kernel_with_hooks(vec![Arc::new(ObserveHook {
+        after: after.clone(),
+        stops: stops.clone(),
+    })])
+    .await;
+    let outcome = kernel
+        .send_user_message(Default::default(), "调用 echo")
+        .await
+        .unwrap();
+    assert_eq!(
+        after.lock().expect("after poisoned").len(),
+        1,
+        "after_tool 应被调用"
+    );
+    assert!(
+        !stops.lock().expect("stops poisoned").is_empty(),
+        "turn_stopping 应被调用"
+    );
+    assert!(outcome.tool_calls >= 1);
+}

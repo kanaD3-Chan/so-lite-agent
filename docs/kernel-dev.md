@@ -231,6 +231,11 @@ LLM 唯一决策循环；`DefaultAgentLoop` 是内置默认实现（`KernelBuild
 4. 串行执行模型产生的工具调用，结构化结果回填对话；
 5. 模型自然停止或护栏中止后返回 `TurnOutcome`。
 
+**事件决策分离（P2）**：`EventSink` 只观察；决策经 `LoopHook`（`agent/loop/hooks.rs`，
+`KernelBuilder::loop_hook` 注入，按注册顺序链式执行）——`before_tool` 可改写参数/
+拒绝（错误回喂模型），`after_tool` / `before_model_request` / `turn_stopping` 观察式。
+任一 hook `Deny` 短路后续 hook 与工具执行。
+
 护栏（均可经 `KernelBuilder` 调整）：
 
 - 单回合最多 25 次工具调用（`max_tool_calls`）；

@@ -53,6 +53,8 @@ pub struct KernelBuilder {
     rpc_extensions: Vec<Arc<dyn RpcExtension>>,
     /// 可替换的 agent loop（Capability seam，ADR-0006）；缺省用内置默认实现。
     loop_engine: Option<Arc<dyn AgentLoop>>,
+    /// 事件决策分离（P2）：loop 决策 hook 链（before_tool 可拒绝/改写，其余观察）。
+    loop_hooks: Vec<Arc<dyn crate::agent::r#loop::LoopHook>>,
     /// Rune 脚本用户插件（ADR-0006；feature rune-plugins）。
     #[cfg(feature = "rune-plugins")]
     script_plugins: Vec<crate::rune::ScriptPlugin>,
@@ -84,6 +86,7 @@ impl KernelBuilder {
             turn_budget: Duration::from_secs(10 * 60),
             rpc_extensions: Vec::new(),
             loop_engine: None,
+            loop_hooks: Vec::new(),
             #[cfg(feature = "rune-plugins")]
             script_plugins: Vec::new(),
         }
@@ -180,6 +183,14 @@ impl KernelBuilder {
         self
     }
 
+    /// 注入决策 hook（事件决策分离，P2）：按注册顺序链式执行。
+    /// `before_tool` 可改写参数/拒绝（错误回喂模型），其余观察式。
+    /// 仅对内置默认 loop 生效（自定义 loop 需自行消费 hook）。
+    pub fn loop_hook(mut self, hook: Arc<dyn crate::agent::r#loop::LoopHook>) -> Self {
+        self.loop_hooks.push(hook);
+        self
+    }
+
     /// 注册一个 Rune 脚本用户插件（ADR-0006）：目录形态（manifest.json + plugin.rn）
     /// 经 [`ScriptPlugin::from_dir`] 加载后交给本方法；编译失败在 build() 时 fail-fast。
     #[cfg(feature = "rune-plugins")]
@@ -252,8 +263,8 @@ impl KernelBuilder {
 
         let loop_engine: Arc<dyn AgentLoop> = match self.loop_engine {
             Some(engine) => engine,
-            None => Arc::new(
-                DefaultAgentLoop::new(
+            None => {
+                let mut engine = DefaultAgentLoop::new(
                     model,
                     dispatch.clone(),
                     auditor.clone(),
@@ -264,8 +275,12 @@ impl KernelBuilder {
                     self.session_switch,
                 )
                 .with_compaction_limits(self.context_limit_tokens, self.compaction_keep_last)
-                .with_tool_guards(self.max_tool_calls, self.max_consecutive_failures),
-            ),
+                .with_tool_guards(self.max_tool_calls, self.max_consecutive_failures);
+                for hook in self.loop_hooks {
+                    engine = engine.with_hook(hook);
+                }
+                Arc::new(engine)
+            }
         };
 
         Ok(Kernel::assemble(

@@ -93,9 +93,11 @@ requires 句柄）端到端注册并调用；AgentLoop trait 化后默认实现�
   目录删除卸载；manifest（requires 白名单）变更 = 重新加载；**执行超时（B2）**：
   单次脚本调用 30s 默认超时（`with_call_timeout` 可配），死循环不卡死执行线程；
 - 事件 / 审计 / RPC 桥：脚本插件经宿主函数触发 `Event::Custom`、读审计、调通用 RPC；
-- 事件决策分离（调研报告路线 1）：保留 `EventSink` 播报，新增内核插件 typed hook
-  （`before_tool` / `after_tool` / `before_model_request` / `turn_stopping`），
-  Rune 只暴露白名单筛选的观察事件；
+- **事件决策分离（✅ 已落地，调研报告路线 1）**：保留 `EventSink` 播报（观察），
+  新增 `LoopHook` 决策链（`before_tool` / `after_tool` / `before_model_request` /
+  `turn_stopping`）——`before_tool` 可**改写参数或拒绝**（错误回喂模型），其余观察式；
+  内核插件/使用方实现 trait，经 `KernelBuilder::loop_hook` 按序注入；
+  Rune 脚本不直接实现（脚本无具体类型），观察需求经 `Event::Custom` 上浮；
 - 不可信插件加固（后续项）：`session_read` 越权收窄（多会话场景）、emit_event/log
   洪泛配额——单机单用户场景可接受，多用户/多租户由下游在服务层控制；
 - GUI 长全：流式输出、会话列表、工具调用面板（事件/RPC 走 WS）；前端工程化（Vue/TS）

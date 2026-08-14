@@ -49,6 +49,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 | `default_tool_timeout(Duration)` | 工具默认超时 | 30s |
 | `turn_budget(Duration)` | 单回合总预算 | 10min |
 | `loop_engine(Arc<dyn AgentLoop>)` | 注入可替换的 agent loop（Capability seam，ADR-0006）；缺省为内置默认实现 | 内置 `DefaultAgentLoop` |
+| `loop_hook(Arc<dyn LoopHook>)` | 注入决策 hook（事件决策分离，P2）：before_tool 可改写/拒绝，其余观察式；按序链式执行（仅默认 loop） | 无 |
 | `script_plugin(ScriptPlugin)` | 注册 Rune 脚本用户插件（feature `rune-plugins`；目录形态经 `ScriptPlugin::from_dir` 加载） | 无 |
 | `rpc_extension(Arc<dyn RpcExtension>)` | 业务 RPC 方法扩展 | 无 |
 

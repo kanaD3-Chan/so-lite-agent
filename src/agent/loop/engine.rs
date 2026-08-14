@@ -72,6 +72,8 @@ pub struct DefaultAgentLoop {
     compaction_keep_last: usize,
     /// 回合内主动切换会话（session::switch 工具）。
     switcher: Option<Arc<dyn SessionSwitch>>,
+    /// 事件决策分离（P2）：决策 hook 链（before_tool 可拒绝/改写，其余观察）。
+    hooks: super::hooks::HookChain,
 }
 
 impl DefaultAgentLoop {
@@ -99,7 +101,14 @@ impl DefaultAgentLoop {
             context_limit_tokens: 131_072,
             compaction_keep_last: 15,
             switcher,
+            hooks: Vec::new(),
         }
+    }
+
+    /// 注入决策 hook（事件决策分离，P2）：按注册顺序链式执行。
+    pub fn with_hook(mut self, hook: Arc<dyn super::hooks::LoopHook>) -> Self {
+        self.hooks.push(hook);
+        self
     }
 
     pub fn with_compaction_limits(
@@ -157,6 +166,8 @@ impl DefaultAgentLoop {
             // 系统提示每次请求注入（不落消息树），保证无状态 API 拿到完整人格设定。
             let mut req_messages = vec![Message::system((self.system_prompt)())];
             req_messages.extend(conversation.iter().cloned());
+            // 事件决策分离（P2）：模型请求前观察消息面（不可阻断）。
+            super::hooks::run_before_model_request(&self.hooks, &req_messages).await;
             let mut request = ModelRequest {
                 model: ModelKind::Main,
                 messages: req_messages,
@@ -403,6 +414,27 @@ impl DefaultAgentLoop {
                 let wire_name = acc.name.clone();
                 let full_name = self.dispatch.resolve_wire(&wire_name).unwrap_or_default();
                 let params: Value = serde_json::from_str(&acc.arguments).unwrap_or(Value::Null);
+                // 事件决策分离（P2）：before_tool 可改写参数或拒绝（错误回喂模型）。
+                let params =
+                    match super::hooks::run_before_tool(&self.hooks, &full_name, &params).await {
+                        Ok(p) => p,
+                        Err(e) => {
+                            self.events.emit(Event::ToolEnd {
+                                entry: full_name.clone(),
+                                ok: false,
+                            });
+                            append_to_path(
+                                &mut conversation,
+                                Message::tool_call_with_id(
+                                    full_name,
+                                    params,
+                                    Err(e),
+                                    acc.call_id.clone(),
+                                ),
+                            );
+                            continue;
+                        }
+                    };
                 self.events.emit(Event::ToolStart {
                     entry: full_name.clone(),
                     icon: self.dispatch.entry_icon(&full_name),
@@ -436,6 +468,8 @@ impl DefaultAgentLoop {
                         .call_tool(&full_name, params.clone(), Caller::Model)
                         .await
                 };
+                // 事件决策分离（P2）：after_tool 观察结果（不可阻断）。
+                super::hooks::run_after_tool(&self.hooks, &full_name, &result).await;
                 self.events.emit(Event::ToolEnd {
                     entry: full_name.clone(),
                     ok: result.is_ok(),
@@ -484,6 +518,8 @@ impl DefaultAgentLoop {
             usage: usage_opt(&turn_usage),
             session_key: current_session,
         };
+        // 事件决策分离（P2）：回合停时观察停止原因（不可阻断）。
+        super::hooks::run_turn_stopping(&self.hooks, &outcome.stop_reason).await;
         self.events.emit(Event::TurnEnd {
             stop_reason: outcome.stop_reason.clone(),
         });

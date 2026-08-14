@@ -186,6 +186,23 @@ impl DynamicService for MyNotesService {
   多用户/多租户场景请在下游 `DynamicService` 实现层做会话范围控制；
   `emit_event`/`log` 无配额（单 agent 场景可接受，后续可加）。
 
+### 事件决策分离（P2）：`LoopHook`
+
+`EventSink` 是观察（fire-and-forget）；需要**决策**（拒绝/改写工具调用）用
+`LoopHook`——内核插件/使用方在 Rust 侧实现 trait，经 `KernelBuilder::loop_hook`
+按序注入（对内置默认 loop 生效）：
+
+| hook | 时机 | 能力 |
+|---|---|---|
+| `before_tool(entry, params)` | 工具执行前 | **改写参数**（`Allow(Some(新参数))`）或**拒绝**（`Deny(原因)`，错误回喂模型） |
+| `after_tool(entry, result)` | 工具执行后 | 观察结果（告警/审计），不可阻断 |
+| `before_model_request(messages)` | 模型请求前 | 观察消息面，不可阻断 |
+| `turn_stopping(stop_reason)` | 回合停时 | 观察停止原因，不可阻断 |
+
+Rune 脚本插件**不直接**实现本 trait（脚本无具体类型）；决策需求由下游 Rust 侧
+实现 hook，观察需求经 `Event::Custom` 上浮。示例见 `src/agent/loop/hooks.rs` 与
+`builder/tests.rs` 的 hook 测试。
+
 ## 目录编排（推荐约定）
 
 契约与代码放哪无关，但推荐**一插件一目录**（沿用 mistake-agent 的组织风格，不含它的编译期发现语义）：
