@@ -210,6 +210,12 @@ impl Kernel {
         // 前端树视图回溯断链）。
         let mut persisted_last: Option<MessageId> = None;
         for msg in &outcome.messages {
+            // session::switch 是控制动作不是对话内容：不落会话树、不随历史携带
+            // （ADR-0034，mistake-agent 同款——避免模型在新上下文看到切换调用
+            // 而反复切换）。
+            if msg.is_switch_tool_call() {
+                continue;
+            }
             let op = match &msg.kind {
                 MessageKind::System { .. } => {
                     // 摘要消息由压缩分支统一处理（replace 遮蔽被压段）。
