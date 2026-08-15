@@ -137,6 +137,10 @@ async fn turn_boundary_consumes_interrupts_and_audits() {
     bus.send(Interrupt::CompactionDone {
         session: SessionKey::new(),
     });
+    bus.send(Interrupt::Custom {
+        name: "iot.alert".into(),
+        payload: serde_json::json!({"device_id": "env_sensor"}),
+    });
     let (loop_engine, sink, _) = setup_loop(bus, 100_000);
     let input = TurnInput {
         messages: vec![Message::user("你好")],
@@ -151,9 +155,14 @@ async fn turn_boundary_consumes_interrupts_and_audits() {
         .iter()
         .filter(|r| matches!(r, AuditRecord::Interrupt { .. }))
         .collect();
-    assert_eq!(interrupts.len(), 2);
+    assert_eq!(interrupts.len(), 3);
     assert!(records.iter().any(|r| matches!(
         r,
         AuditRecord::Interrupt { name, .. } if name == "config_changed"
+    )));
+    // ADR-0011：Custom 中断审计名 = custom:<name>。
+    assert!(records.iter().any(|r| matches!(
+        r,
+        AuditRecord::Interrupt { name, .. } if name == "custom:iot.alert"
     )));
 }

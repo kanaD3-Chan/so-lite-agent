@@ -634,12 +634,12 @@ impl AgentLoop for DefaultAgentLoop {
 
 fn interrupt_name(interrupt: &Interrupt) -> String {
     match interrupt {
-        Interrupt::SessionSwitched { .. } => "session_switched",
-        Interrupt::GoalUpdated { .. } => "goal_updated",
-        Interrupt::ConfigChanged => "config_changed",
-        Interrupt::CompactionDone { .. } => "compaction_done",
+        Interrupt::SessionSwitched { .. } => "session_switched".into(),
+        Interrupt::GoalUpdated { .. } => "goal_updated".into(),
+        Interrupt::ConfigChanged => "config_changed".into(),
+        Interrupt::CompactionDone { .. } => "compaction_done".into(),
+        Interrupt::Custom { name, .. } => format!("custom:{name}"),
     }
-    .into()
 }
 
 fn message_chars(msg: &Message) -> usize {

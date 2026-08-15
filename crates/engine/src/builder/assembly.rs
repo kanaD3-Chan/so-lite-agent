@@ -60,6 +60,10 @@ pub struct KernelBuilder {
     loop_engine: Option<Arc<dyn AgentLoop>>,
     /// 事件决策分离（P2）：loop 决策 hook 链（before_tool 可拒绝/改写，其余观察）。
     loop_hooks: Vec<Arc<dyn crate::agent::r#loop::LoopHook>>,
+    /// 中断总线：缺省 build 时自建；使用方需要**在 build 前**共享同一总线
+    /// （如外部驱动任务经 `Kernel::run_turn` 消费业务中断自动开回合，ADR-0011）
+    /// 时注入，build 后经 `Kernel::interrupt_bus` 拿到的是同一实例。
+    interrupt_bus: Option<InterruptBus>,
     /// Rune 脚本用户插件（ADR-0006；feature rune-plugins）。
     #[cfg(feature = "rune-plugins")]
     script_plugins: Vec<crate::rune::ScriptPlugin>,
@@ -93,6 +97,7 @@ impl KernelBuilder {
             rpc_extensions: Vec::new(),
             loop_engine: None,
             loop_hooks: Vec::new(),
+            interrupt_bus: None,
             #[cfg(feature = "rune-plugins")]
             script_plugins: Vec::new(),
         }
@@ -205,6 +210,16 @@ impl KernelBuilder {
         self
     }
 
+    /// 注入共享中断总线（ADR-0011）：外部驱动任务（业务中断 → 空闲自动开回合）
+    /// 需要在 build 前与 kernel 持有**同一** `InterruptBus` 实例——缺省由 build
+    /// 自建，build 后经 `Kernel::interrupt_bus` 只能拿引用、无法在外部持有时
+    /// 注入到别处。注入后 loop 回合边界消费的、`Kernel::interrupt_bus` 暴露的
+    /// 都是本实例。
+    pub fn interrupt_bus(mut self, bus: InterruptBus) -> Self {
+        self.interrupt_bus = Some(bus);
+        self
+    }
+
     /// 注册一个 Rune 脚本用户插件（ADR-0006）：目录形态（manifest.json + plugin.rn）
     /// 经 [`ScriptPlugin::from_dir`] 加载后交给本方法；编译失败在 build() 时 fail-fast。
     #[cfg(feature = "rune-plugins")]
@@ -267,7 +282,7 @@ impl KernelBuilder {
             events.clone(),
         ));
 
-        let bus = InterruptBus::new();
+        let bus = self.interrupt_bus.unwrap_or_default();
         let model = handles.model().expect("默认模型已注入").inner().clone();
         let store = handles.session().expect("默认会话存储已注入").clone();
         let system_prompt: Arc<dyn Fn() -> String + Send + Sync> =

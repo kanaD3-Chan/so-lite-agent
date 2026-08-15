@@ -47,12 +47,16 @@ _Avoid_: 权限（含义过泛）
 _Avoid_: 全名（指内部 namespace::tool）
 
 **Interrupt（内部中断）**:
-内核组件向 agent loop 发出的环境变更信号（会话切换、Goal 更新、配置变更、压缩完成），回合边界消费，不抢占当前回合。
+内核组件向 agent loop 发出的环境变更信号（会话切换、Goal 更新、配置变更、压缩完成、`Custom` 业务中断），回合边界消费，不抢占当前回合。
 _Avoid_: 事件（Event 指面向使用方 GUI 的播报）
 
 **ConfigChanged（配置变更中断）**:
 通用配置变化（原 mistake-agent 的 SettingsChanged 通用化）引发的中断，通知 loop 下回合按新环境重组上下文。
 _Avoid_: SettingsChanged（业务命名）
+
+**Custom interrupt（业务自定义中断）**:
+`Interrupt::Custom { name, payload }`（ADR-0011）：业务中断的通用变体（告警通知、定时提醒等），kernel 只运输与审计（审计名 `custom:<name>`），不解析载荷；**空闲时消费并自动开回合**由使用方装配（`KernelBuilder::interrupt_bus` 注入共享总线 + `Kernel::run_turn` 外部驱动回合，外部事实消息由调用方先落盘）。
+_Avoid_: 把业务载荷语义（告警/定时器结构）写进引擎
 
 ## 插件与服务
 

@@ -7,7 +7,9 @@ use std::time::Duration;
 
 use crate::agent::dispatch::ToolCallContext;
 use crate::agent::r#loop::StopReason;
-use crate::agent::session::{Goal, SessionKey, SessionMeta, SessionSwitch, Summarizer};
+use crate::agent::session::{
+    Goal, Interrupt, InterruptBus, SessionKey, SessionMeta, SessionSwitch, Summarizer,
+};
 use crate::audit::{Auditor, MemoryAuditSink};
 use crate::contract::{CallerPolicy, Info};
 use crate::events::MemoryEventSink;
@@ -605,4 +607,98 @@ async fn registry_arc_shares_kernel_registry() {
     );
     // 同一实例（Arc 内层地址 == &Registry 视图地址）。
     assert!(std::ptr::eq(&*registry, kernel.registry()));
+}
+
+// ---------- 外部驱动回合（ADR-0011）：run_turn + 共享中断总线 ----------
+
+#[tokio::test]
+async fn run_turn_drives_turn_on_active_path_without_user_message() {
+    // 业务中断（告警通知）场景：外部先落盘一条 tool 消息（alarm::notify），
+    // 再经 Kernel::run_turn 空闲开回合——模型看到工具结果并回复，落盘管线与
+    // send_user_message 一致（时间线可见、可审计）。
+    let key = SessionKey::new();
+    let store = Arc::new(InMemorySessionStore::default());
+    store
+        .create_session(&key, &SessionMeta::new(key))
+        .await
+        .unwrap();
+    store
+        .append_event(
+            &key,
+            SessionEvent::new(
+                Message::tool_call(
+                    "alarm::notify",
+                    json!({}),
+                    Ok(json!({
+                        "items": [{
+                            "kind": "threshold",
+                            "device_id": "env_sensor",
+                            "metric": "temp",
+                            "value": 33.5,
+                            "triggered_at": 1723700000000u64,
+                        }]
+                    })),
+                ),
+                SurfaceOp::Append,
+            ),
+        )
+        .await
+        .unwrap();
+    let last = store.read_path(&key).await.unwrap().pop().unwrap();
+    store.set_active_path(&key, Some(last.id)).await.unwrap();
+
+    let auditor = Auditor::new(Arc::new(MemoryAuditSink::default()));
+    let handles = ServiceHandles::default()
+        .with_session(store.clone())
+        .with_model(ModelHandle::new(
+            Arc::new(SequenceModel::new(vec![text_chunks(
+                "收到告警，我来处理。",
+            )])),
+            Duration::from_secs(30),
+            auditor,
+        ));
+    let kernel = KernelBuilder::new()
+        .event_sink(Arc::new(MemoryEventSink::default()))
+        .service_handles(handles)
+        .build()
+        .unwrap();
+
+    let outcome = kernel.run_turn(key).await.unwrap();
+    assert!(matches!(outcome.stop_reason, StopReason::Natural));
+    assert_eq!(outcome.messages.len(), 1, "回合新增 = 助手回复");
+    assert!(matches!(
+        &outcome.messages[0].kind,
+        MessageKind::Assistant { text } if text == "收到告警，我来处理。"
+    ));
+
+    // 落盘管线一致：活跃链 = [notify 工具消息, 助手回复]；活跃末端推进到回复。
+    let path = store.read_path(&key).await.unwrap();
+    assert_eq!(path.len(), 2);
+    assert!(matches!(
+        &path[0].kind,
+        MessageKind::ToolCall { entry, .. } if entry == "alarm::notify"
+    ));
+    assert!(matches!(&path[1].kind, MessageKind::Assistant { .. }));
+}
+
+#[tokio::test]
+async fn injected_interrupt_bus_is_shared_with_kernel() {
+    // KernelBuilder::interrupt_bus 注入：build 前外部持同一总线，build 后
+    // kernel.interrupt_bus() 看到的是同一实例（外部 send → kernel take_all）。
+    let bus = InterruptBus::new();
+    let kernel = KernelBuilder::new()
+        .event_sink(Arc::new(MemoryEventSink::default()))
+        .interrupt_bus(bus.clone())
+        .build()
+        .unwrap();
+    bus.send(Interrupt::Custom {
+        name: "iot.alert".into(),
+        payload: json!({"value": 1}),
+    });
+    let taken = kernel.interrupt_bus().take_all();
+    assert_eq!(taken.len(), 1);
+    assert!(matches!(
+        &taken[0],
+        Interrupt::Custom { name, .. } if name == "iot.alert"
+    ));
 }

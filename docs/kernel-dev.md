@@ -145,7 +145,9 @@ rune/                     Rune 脚本用户插件（ADR-0006，feature `rune-plu
    注册期 fail-fast：namespace/wire 撞名、`requires` 缺失、重复 `provides`、
    用户插件声明 `provides` 都当场报错；
 5. 创建 `Dispatch`（注册表 + 审计 + 默认超时 + 宽限 + 回合预算 + 事件）；
-6. 创建共享 `InterruptBus` 与 `AgentLoop`（注入模型、摘要器、会话切换钩子、压缩与护栏参数）；
+6. 创建共享 `InterruptBus`（缺省 build 自建；使用方需在 build 前共享同一实例
+   时经 `KernelBuilder::interrupt_bus` 注入，ADR-0011）与 `AgentLoop`（注入模型、
+   摘要器、会话切换钩子、压缩与护栏参数）；
 7. 返回 `Kernel`（持有 RPC 扩展链）。
 
 新增一个需要启动依赖的内核组件，应在 `KernelBuilder` 完成实例化和注入，再经插件/句柄暴露；
@@ -311,6 +313,25 @@ seq 连续、落盘后不可修改），消息历史由**遮蔽投影**派生（
 则默认 create + append（本回合用户消息与回合末消息都会推进活跃路径）。回合内切换
 走 `SessionSwitch` 钩子（`KernelBuilder::session_switch` 注入）；`session::switch` /
 `context::compact` 工具由使用方注册（参照 [docs/plugin-dev.md](plugin-dev.md)）。
+
+### 外部驱动回合（业务中断 → 空闲自动开回合，ADR-0011）
+
+内核组件/外部任务需要"不追加用户消息、主动驱动模型开回合"（如告警通知、
+定时提醒以 tool 消息插入会话后让模型看到事实并决策）。通用能力三件套：
+
+- **`Interrupt::Custom { name, payload }`**：业务自定义中断变体，kernel 只运输
+  与审计（审计名 `custom:<name>`），不解析载荷；
+- **`KernelBuilder::interrupt_bus(bus)`**：build 前注入共享总线（外部驱动任务
+  与 kernel 必须持同一实例；缺省 build 自建）；
+- **`Kernel::run_turn(key)`**：按会话活跃链投影直接跑一轮 loop，落盘管线与
+  `send_user_message*` 完全一致；回合进行中调用返回错误（并发拒绝）。
+
+使用方装配模式（iot-agent main.rs 示范）：build 前 `let bus = InterruptBus::new()`
+→ `KernelBuilder::interrupt_bus(bus.clone())` → build 后 spawn 驱动任务：轮询
+`bus.take_all()`，遇 `Custom` 且 `kernel.get_state().running == false` 时
+`kernel.run_turn(key)`。外部事实消息（如 tool 消息）由调用方先经 `SessionStore`
+落盘，`run_turn` 只负责驱动与落盘；忙时错过回合的告警留在时间线，下个回合
+自然可见。
 
 ## 10. RPC 与事件
 

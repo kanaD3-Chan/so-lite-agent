@@ -115,6 +115,15 @@ pub enum Interrupt {
     CompactionDone {
         session: SessionKey,
     },
+    /// 业务自定义中断（ADR-0011）：内核组件/使用方上浮业务语义中断
+    /// （如告警通知、定时提醒），kernel 不解析 name/payload，只负责运输与
+    /// 审计；空闲时消费并自动开回合由使用方装配（`Kernel::run_turn` +
+    /// `KernelBuilder::interrupt_bus` 注入同一总线）。
+    Custom {
+        name: String,
+        #[serde(default)]
+        payload: serde_json::Value,
+    },
 }
 
 /// 中断总线：跨内核组件共享，回合边界取空。
@@ -168,4 +177,27 @@ pub trait SessionDecision: Send + Sync {
 
     /// 回合结束：会话调度决策（如 start_new → 只挂摘要节点，下条消息从子树继续）。
     async fn on_turn_end(&self, key: &SessionKey, outcome: &[Message]) -> Result<(), String>;
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn custom_interrupt_round_trip() {
+        // ADR-0011：业务自定义中断（name + payload）经总线传输可序列化往返。
+        let interrupt = Interrupt::Custom {
+            name: "iot.alert".into(),
+            payload: serde_json::json!({"device_id": "env_sensor", "value": 33.0}),
+        };
+        let json = serde_json::to_string(&interrupt).unwrap();
+        let back: Interrupt = serde_json::from_str(&json).unwrap();
+        match back {
+            Interrupt::Custom { name, payload } => {
+                assert_eq!(name, "iot.alert");
+                assert_eq!(payload["value"], 33.0);
+            }
+            other => panic!("应反序列化为 Custom：{other:?}"),
+        }
+    }
 }

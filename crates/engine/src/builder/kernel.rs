@@ -198,9 +198,43 @@ impl Kernel {
             }
         };
 
+        let outcome = self.run_loop_turn(messages, forced_wire).await?;
+        self.finish_turn(effective_key, outcome).await
+    }
+
+    /// 外部驱动回合（ADR-0011）：不追加用户消息，按活跃链投影直接跑一轮 loop，
+    /// 并把新增消息落盘（与 `send_user_message*` 同一落盘管线）。
+    ///
+    /// 用途：业务中断（告警通知/定时提醒）在**空闲时**自动开回合——调用方先把
+    /// 外部事实消息（如 tool 消息）追加进会话（经 `SessionStore`），再经本方法
+    /// 驱动模型看到事实并决策，时间线可见、可审计。
+    ///
+    /// 约定：回合进行中调用返回错误（调用方先查 `get_state().running` 或重试）；
+    /// 中断总线的消费与审计由调用方（外部驱动任务）负责，loop 只在回合边界消费。
+    pub async fn run_turn(&self, key: SessionKey) -> Result<TurnOutcome, LoopError> {
+        let messages = self.store.read_path(&key).await.map_err(session_err)?;
+        let outcome = self.run_loop_turn(messages, None).await?;
+        self.finish_turn(key, outcome).await
+    }
+
+    /// 公共回合执行段（send_user_message* 与 run_turn 共用）：占用 active 槽
+    /// （并发拒绝）跑一轮 loop 并释放。结果落盘见 [`Self::finish_turn`]。
+    async fn run_loop_turn(
+        &self,
+        messages: Vec<Message>,
+        forced_wire: Option<String>,
+    ) -> Result<TurnOutcome, LoopError> {
         let tools = self.registry.model_tools();
         let signal = AbortSignal::new();
-        *self.active.lock().expect("active poisoned") = Some(signal.clone());
+        {
+            let mut active = self.active.lock().expect("active poisoned");
+            if active.is_some() {
+                return Err(LoopError::Internal(
+                    "已有回合在进行中（并发回合被拒）".into(),
+                ));
+            }
+            *active = Some(signal.clone());
+        }
         let outcome = self
             .loop_engine
             .run_turn(TurnInput {
@@ -212,8 +246,16 @@ impl Kernel {
             })
             .await;
         *self.active.lock().expect("active poisoned") = None;
-        let outcome = outcome?;
+        outcome
+    }
 
+    /// 回合落盘公共尾部（send_user_message* 与 run_turn 共用）：追加新增消息、
+    /// 压缩 splice、活跃路径推进、回合末决策、last_activity 与审计。
+    async fn finish_turn(
+        &self,
+        effective_key: SessionKey,
+        outcome: TurnOutcome,
+    ) -> Result<TurnOutcome, LoopError> {
         // 追加本回合新增消息（assistant / reasoning / tool 均为 append）；
         // 记录末条消息 id——活跃路径推进到回合末（mistake-agent 消息树分支语义：
         // active_path 指向链尾，否则 read_path 停在最后一条 user，树内分叉会挂错点、
