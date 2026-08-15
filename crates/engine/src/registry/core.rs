@@ -8,7 +8,7 @@ use std::sync::{Arc, RwLock};
 use crate::context::{EntryRegistrar, KernelContext, PluginContext, RegistrarTargets};
 use crate::contract::{CallerPolicy, Info, LoadPolicy, PluginError, full_name, full_to_wire};
 use crate::logger::LoggerHandle;
-use crate::model::ToolSchema;
+use crate::model::{ToolMeta, ToolSchema};
 use crate::services::{ServiceHandles, ServiceId};
 
 use super::plugin::{EntryKind, KernelDescriptor, PluginDescriptor, RegisteredEntry};
@@ -398,6 +398,27 @@ impl Registry {
                         icon: t.icon.clone(),
                         namespace_title: e.info.title.clone(),
                         namespace_icon: e.info.icon.clone(),
+                    });
+                }
+            }
+        }
+        out
+    }
+
+    /// 全量工具展示元数据（GUI 事件气泡渲染，list_tool_meta 数据源）：全部
+    /// UserAndModel 工具（**含 user_visible=false 的仅模型工具**，如
+    /// session::switch/alarm::notify——隐藏工具的事件消息仍需 title/icon 渲染）；
+    /// 精简为 name/title/icon，不含 params/policy/description（展示与候选分离）。
+    pub fn tool_meta(&self) -> Vec<ToolMeta> {
+        let entries = self.entries.read().expect("registry poisoned");
+        let mut out = Vec::new();
+        for e in entries.values() {
+            for t in &e.info.tools {
+                if t.policy == CallerPolicy::UserAndModel {
+                    out.push(ToolMeta {
+                        name: full_to_wire(&full_name(&e.info.namespace, &t.name)),
+                        title: t.title.clone(),
+                        icon: t.icon.clone(),
                     });
                 }
             }

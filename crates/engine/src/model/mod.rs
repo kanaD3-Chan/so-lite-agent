@@ -20,7 +20,7 @@ pub use anthropic::AnthropicModelService;
 pub use completions::ChatCompletionsModelService;
 pub use contract::{
     ItemKind, ModelChunk, ModelError, ModelKind, ModelRequest, ModelResponse, ModelService,
-    ModelStream, ResponseFormat, TokenUsage, ToolCallSpec, ToolChoice, ToolSchema,
+    ModelStream, ResponseFormat, TokenUsage, ToolCallSpec, ToolChoice, ToolMeta, ToolSchema,
 };
 pub use handle::{AbortSignal, ModelHandle};
 pub use mock::MockModelService;

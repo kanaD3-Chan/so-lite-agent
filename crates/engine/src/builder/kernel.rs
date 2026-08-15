@@ -12,7 +12,7 @@ use crate::audit::{AuditRecord, Auditor};
 use crate::contract::{CallerPolicy, ToolError, full_to_wire};
 use crate::events::EventSink;
 use crate::message::{Attachment, Message, MessageId, MessageKind};
-use crate::model::{AbortSignal, ToolSchema};
+use crate::model::{AbortSignal, ToolMeta, ToolSchema};
 use crate::registry::Registry;
 use crate::rpc::{Method, RpcAttachment, RpcError, RpcExtension, RpcFrame, RpcRequest};
 use crate::services::{SessionEvent, SessionStore, SurfaceOp, fold_surface};
@@ -586,6 +586,10 @@ impl Kernel {
                 id,
                 serde_json::to_value(self.list_tools()).unwrap_or_default(),
             ),
+            Method::ListToolMeta => RpcFrame::ok(
+                id,
+                serde_json::to_value(self.tool_meta()).unwrap_or_default(),
+            ),
             Method::Custom { method, params } => {
                 let mut last_err = RpcError::not_handled(&method);
                 for ext in &self.rpc_extensions {
@@ -622,6 +626,13 @@ impl Kernel {
     /// 如 session::switch）。与 [`Self::list_tools`] 对照验证可见性过滤。
     pub fn model_tools(&self) -> Vec<ToolSchema> {
         self.registry.model_tools()
+    }
+
+    /// 全量工具展示元数据（GUI 事件气泡渲染，RPC `list_tool_meta` 数据源）：
+    /// 含 user_visible=false 的仅模型工具（如 session::switch、alarm::notify
+    /// 触发的事件消息仍需 title/icon 渲染）。
+    pub fn tool_meta(&self) -> Vec<ToolMeta> {
+        self.registry.tool_meta()
     }
 
     /// 用户触发入口（等价 trigger_command）：找不到 Command 时回退同名 Tool。

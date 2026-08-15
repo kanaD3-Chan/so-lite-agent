@@ -63,6 +63,19 @@ pub enum ToolChoice {
     },
 }
 
+/// 工具展示元数据（GUI 事件气泡渲染用，list_tool_meta 数据源）：全量
+/// UserAndModel 工具（**含 user_visible=false 的仅模型工具**，如 session::switch
+/// /alarm::notify——隐藏工具的事件消息仍需 title/icon 渲染）；不含 params/
+/// policy/description——展示与候选分离。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ToolMeta {
+    pub name: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub title: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub icon: Option<String>,
+}
+
 /// 模型可见工具（wire name + JSON Schema + GUI 展示元数据）。
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ToolSchema {

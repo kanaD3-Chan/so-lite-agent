@@ -307,6 +307,15 @@ fn user_tools_carries_namespace_metadata_and_filters_invisible() {
         model.iter().all(|t| t.namespace_title.is_none()),
         "模型面不带 GUI 分组元数据"
     );
+    // 展示元数据（list_tool_meta）：全量 UserAndModel（含隐藏工具）——
+    // 隐藏工具的事件消息仍需 title/icon 渲染；精简为 name/title/icon。
+    let meta = registry.tool_meta();
+    assert_eq!(meta.len(), 2);
+    let hidden = meta.iter().find(|m| m.name == "demo__hidden").unwrap();
+    assert_eq!(hidden.title.as_deref(), None);
+    let shown = meta.iter().find(|m| m.name == "demo__shown").unwrap();
+    assert_eq!(shown.title.as_deref(), Some("可见工具"));
+    assert_eq!(shown.icon.as_deref(), None);
 }
 
 #[test]

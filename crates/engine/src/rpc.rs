@@ -70,6 +70,8 @@ pub enum Method {
         session_key: SessionKey,
     },
     ListTools,
+    /// 全量工具展示元数据（GUI 事件气泡渲染：含 user_visible=false 的仅模型工具）。
+    ListToolMeta,
     Custom {
         method: String,
         #[serde(default)]
