@@ -618,6 +618,12 @@ impl Kernel {
         self.registry.user_tools()
     }
 
+    /// 模型可见工具全量（wire name；含 user_visible=false 的仅模型工具，
+    /// 如 session::switch）。与 [`Self::list_tools`] 对照验证可见性过滤。
+    pub fn model_tools(&self) -> Vec<ToolSchema> {
+        self.registry.model_tools()
+    }
+
     /// 用户触发入口（等价 trigger_command）：找不到 Command 时回退同名 Tool。
     pub async fn call_command(&self, entry: &str, params: Value) -> Result<Value, ToolError> {
         self.dispatch.call_command(entry, params).await

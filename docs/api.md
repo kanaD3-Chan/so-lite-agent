@@ -83,7 +83,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 | `switch_branch(key, message_id)` | 切换活跃路径，返回新路径消息 |
 | `list_sessions()` | 会话元数据列表 |
 | `read_session(key)` | 会话**全量消息树**（逻辑时间线：压缩摘要节点前插到压缩点，被遮蔽分支/历史完整保留——前端树视图 + `< / >` 分支导航数据源；模型可见活跃链另经 `read_path`） |
-| `list_tools()` | 用户可见工具目录（GUI 工具面板数据源：UserAndModel **且** `user_visible=true`，wire name + JSON Schema + title/icon；`session::switch` 等仅模型工具不出现；模型可见工具全量列表另经 `registry().model_tools()`） |
+| `list_tools()` | 用户可见工具目录（GUI 工具面板数据源：UserAndModel **且** `user_visible=true`，wire name + JSON Schema + title/icon，每工具附所属插件的 `namespace_title`/`namespace_icon`（组标题/组图标，缺省回退 namespace）；`session::switch` 等仅模型工具不出现；模型可见工具全量列表另经 `model_tools()`） |
+| `model_tools()` | 模型可见工具全量（wire name；含 `user_visible=false` 的仅模型工具，如 `session::switch`；不带 GUI 分组元数据） |
 | `handle_rpc(RpcRequest)` | 通用 RPC 入口，返回带 id 的响应帧 |
 | `registry()` / `dispatch()` / `auditor()` / `events()` / `interrupt_bus()` / `registry_arc()` | 深度集成访问点（一般用不到；`registry_arc()` 返回与 kernel 同一注册表实例的 Arc，供 `ScriptPluginLoader` 等外部装配共享） |
 

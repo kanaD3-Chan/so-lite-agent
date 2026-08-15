@@ -88,12 +88,18 @@ impl UserPlugin for StudyPlugin {
 
 注意：插件只写**短名**（`remind`），kernel 拼全名（`study::remind`），模型看到的是 wire name（`study__remind`）。
 
+**插件级展示元数据（Info 可选字段）**：`title`（插件显示名，GUI 按命名空间分组
+展示时作组标题，缺省回退 namespace）、`icon`（插件级 Iconify 图标名，组图标）。
+`Kernel::list_tools` 返回的每个工具附带 `namespace_title`/`namespace_icon`
+（所属插件的上述两字段），GUI 据此分组渲染；模型面（`model_tools`）不带。
+
 **GUI 展示元数据（ToolDef / CommandDef 可选字段，`list_tools` / `user_entries` 数据源）**：
 `title`（用户友好显示名，缺省回退 name）、`icon`（Iconify 图标名，如
 `"mdi:lightbulb-on-outline"`）、`group`（工具面板分组）、`user_visible`（**缺省
-false**——`false` 的工具是"仅模型可调"（如 `session::switch` 控制入口），不出现在
+true**——`false` 的工具是"仅模型可调"（如 `session::switch` 控制入口），不出现在
 用户工具栏；`Kernel::list_tools` / RPC `list_tools` 只返回 `user_visible=true` 的
-入口）。Rune 脚本路径在 `manifest.json` 的 tools/commands 里同名字段声明。
+入口，模型工具列表 `Kernel::model_tools` 不受影响）。Rune 脚本路径在
+`manifest.json` 的 tools/commands 里同名字段声明。
 
 ## Rune 脚本路径（用户插件，ADR-0006）
 

@@ -31,6 +31,12 @@ pub enum LoadPolicy {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
 pub struct Info {
     pub namespace: String,
+    /// 插件级用户友好显示名（GUI 分组展示，如「提醒」；缺省回退 namespace）。
+    #[serde(default)]
+    pub title: Option<String>,
+    /// 插件级 Iconify 图标名（如 "mdi:bell-ring"，GUI 分组展示）。
+    #[serde(default)]
+    pub icon: Option<String>,
     /// 启用标记：**默认 false**——插件必须显式 `enabled: true` 才会注册；
     /// 禁用插件可保留在聚合点/代码中，注册表静默跳过（不做 fail-fast）。
     #[serde(default)]

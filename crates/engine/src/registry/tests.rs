@@ -256,6 +256,60 @@ fn user_entries_filter_invisible() {
 }
 
 #[test]
+fn user_tools_carries_namespace_metadata_and_filters_invisible() {
+    let registry = Registry::new(ServiceHandles::default(), logger());
+    let desc = PluginDescriptor {
+        info: Info {
+            namespace: "demo".into(),
+            title: Some("示例插件".into()),
+            icon: Some("mdi:flask".into()),
+            enabled: true,
+            tools: vec![
+                ToolDef {
+                    name: "hidden".into(),
+                    user_visible: false,
+                    title: None,
+                    group: None,
+                    description: "模型专用".into(),
+                    params: crate::contract::empty_params(),
+                    policy: CallerPolicy::UserAndModel,
+                    timeout: None,
+                    icon: None,
+                },
+                ToolDef {
+                    name: "shown".into(),
+                    user_visible: true,
+                    title: Some("可见工具".into()),
+                    group: None,
+                    description: "用户可用".into(),
+                    params: crate::contract::empty_params(),
+                    policy: CallerPolicy::UserAndModel,
+                    timeout: None,
+                    icon: None,
+                },
+            ],
+            ..Default::default()
+        },
+        register: |_| Ok(()),
+    };
+    registry.register_plugin(desc).unwrap();
+    // 用户面板：只含 user_visible=true，且每个工具携带插件级显示元数据。
+    let user = registry.user_tools();
+    assert_eq!(user.len(), 1);
+    assert_eq!(user[0].name, "demo__shown");
+    assert_eq!(user[0].namespace_title.as_deref(), Some("示例插件"));
+    assert_eq!(user[0].namespace_icon.as_deref(), Some("mdi:flask"));
+    // 模型列表：user_visible=false 仍可见（仅模型可调语义不受影响）。
+    let model = registry.model_tools();
+    assert_eq!(model.len(), 2);
+    assert!(model.iter().any(|t| t.name == "demo__hidden"));
+    assert!(
+        model.iter().all(|t| t.namespace_title.is_none()),
+        "模型面不带 GUI 分组元数据"
+    );
+}
+
+#[test]
 fn kernel_plugin_lazy_registration_binds_handler() {
     LOADED_KERNEL.store(false, Ordering::SeqCst);
     let registry = Registry::new(ServiceHandles::default(), logger());

@@ -75,6 +75,12 @@ pub struct ToolSchema {
     /// Iconify 图标名（如 "mdi:lightbulb-on-outline"，GUI 展示用）。
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub icon: Option<String>,
+    /// 所属插件的显示名（GUI 按命名空间分组展示；缺省回退 namespace）。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub namespace_title: Option<String>,
+    /// 所属插件的 Iconify 图标名（GUI 分组展示）。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub namespace_icon: Option<String>,
 }
 
 #[derive(Debug, Clone)]

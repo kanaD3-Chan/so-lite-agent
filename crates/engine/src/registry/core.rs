@@ -368,6 +368,9 @@ impl Registry {
                         input_schema: serde_json::to_value(&t.params).unwrap_or_default(),
                         title: t.title.clone(),
                         icon: t.icon.clone(),
+                        // 模型面（发给 LLM 的 JSON）不带 GUI 分组元数据。
+                        namespace_title: None,
+                        namespace_icon: None,
                     });
                 }
             }
@@ -379,6 +382,8 @@ impl Registry {
     /// user_visible=true**——`user_visible=false` 的工具（如 session::switch，
     /// 仅模型可调）不出现在用户工具栏（mistake-agent 同款：list_tools 只返回
     /// user_visible=true 的入口点）。模型工具列表仍用 [`Self::model_tools`]。
+    /// 每个工具附所属插件显示元数据（namespace_title/namespace_icon），GUI 按
+    /// 命名空间分组渲染两级菜单（组标题 = 插件 title，缺省回退 namespace）。
     pub fn user_tools(&self) -> Vec<ToolSchema> {
         let entries = self.entries.read().expect("registry poisoned");
         let mut out = Vec::new();
@@ -391,6 +396,8 @@ impl Registry {
                         input_schema: serde_json::to_value(&t.params).unwrap_or_default(),
                         title: t.title.clone(),
                         icon: t.icon.clone(),
+                        namespace_title: e.info.title.clone(),
+                        namespace_icon: e.info.icon.clone(),
                     });
                 }
             }
