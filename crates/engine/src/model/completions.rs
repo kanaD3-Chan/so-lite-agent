@@ -187,16 +187,12 @@ impl ModelService for ChatCompletionsModelService {
                                     break;
                                 }
                                 if let Ok(v) = serde_json::from_str::<Value>(data) {
-                                    if let Some(usage) = v["usage"].as_object() {
-                                        let u = TokenUsage {
-                                            input_tokens: usage["prompt_tokens"].as_u64(),
-                                            output_tokens: usage["completion_tokens"].as_u64(),
-                                            cached_tokens: usage["prompt_cache_hit_tokens"]
-                                                .as_u64(),
-                                            cache_miss_tokens: usage["prompt_cache_miss_tokens"]
-                                                .as_u64(),
-                                            ..Default::default()
-                                        };
+                                    // OpenAI 兼容聚合端（opencode-go / 部分本地代理）按 OpenAI 标准
+                                    // 透传 usage，常缺 prompt_cache_hit/miss_tokens；必须按 &Value 索引
+                                    // （Value::Index 对缺失键返回 Null），不能窄化为 Map 后用 []——
+                                    // Map::Index 委派到 BTreeMap，缺键触发 expect("no entry found for key")。
+                                    if v["usage"].is_object() {
+                                        let u = parse_usage(&v["usage"]);
                                         let _ = tx.send(Ok(ModelChunk::Usage(u))).await;
                                     }
                                     let delta = &v["choices"][0]["delta"];
@@ -254,5 +250,70 @@ impl ModelService for ChatCompletionsModelService {
         });
 
         Ok(Box::new(ReceiverStream::new(rx)))
+    }
+}
+
+/// Chat Completions usage 解析：缺字段返回 `None`，不 panic。
+///
+/// 设计契约：
+/// - 入参是 `&Value`（不是 `&Map`），用 `Value::Index`（缺失键返回 `Null`）。
+/// - 标准 OpenAI usage 字段（`prompt_tokens` / `completion_tokens`）与
+///   DeepSeek/自建端扩展字段（`prompt_cache_hit_tokens` / `prompt_cache_miss_tokens`）
+///   同等对待：缺哪个都不应让 SSE 解析线程崩溃。
+fn parse_usage(usage: &Value) -> TokenUsage {
+    TokenUsage {
+        input_tokens: usage["prompt_tokens"].as_u64(),
+        output_tokens: usage["completion_tokens"].as_u64(),
+        cached_tokens: usage["prompt_cache_hit_tokens"].as_u64(),
+        cache_miss_tokens: usage["prompt_cache_miss_tokens"].as_u64(),
+        ..Default::default()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// 回归：opencode-go / 标准 OpenAI 兼容聚合端常省略 cache 字段——
+    /// 此前 `usage["prompt_cache_hit_tokens"]` 在 `Map` 上索引触发
+    /// `BTreeMap::Index::expect("no entry found for key")` panic，整条 SSE 流断。
+    #[test]
+    fn parse_usage_without_cache_fields_does_not_panic() {
+        let v = json!({
+            "prompt_tokens": 100,
+            "completion_tokens": 50,
+            "total_tokens": 150,
+        });
+        let u = parse_usage(&v);
+        assert_eq!(u.input_tokens, Some(100));
+        assert_eq!(u.output_tokens, Some(50));
+        assert_eq!(u.cached_tokens, None);
+        assert_eq!(u.cache_miss_tokens, None);
+    }
+
+    #[test]
+    fn parse_usage_full() {
+        let v = json!({
+            "prompt_tokens": 100,
+            "completion_tokens": 50,
+            "prompt_cache_hit_tokens": 30,
+            "prompt_cache_miss_tokens": 70,
+        });
+        let u = parse_usage(&v);
+        assert_eq!(u.input_tokens, Some(100));
+        assert_eq!(u.output_tokens, Some(50));
+        assert_eq!(u.cached_tokens, Some(30));
+        assert_eq!(u.cache_miss_tokens, Some(70));
+    }
+
+    #[test]
+    fn parse_usage_minimal() {
+        // 极端：只有 prompt_tokens，其它全缺。
+        let v = json!({"prompt_tokens": 10});
+        let u = parse_usage(&v);
+        assert_eq!(u.input_tokens, Some(10));
+        assert_eq!(u.output_tokens, None);
+        assert_eq!(u.cached_tokens, None);
+        assert_eq!(u.cache_miss_tokens, None);
     }
 }
