@@ -70,7 +70,20 @@ impl ChatCompletionsModelService {
             body["tools"] = json!(tools.iter().map(tool_to_chat_function).collect::<Vec<_>>());
         }
         if let Some(effort) = &request.reasoning_effort {
-            body["reasoning_effort"] = json!(effort);
+            // DeepSeek / OpenAI Chat Completions 兼容端的协议差异（见
+            // https://api-docs.deepseek.com/guides/thinking_mode）：`reasoning_effort`
+            // 只承载强度（low/high/max），开关走独立的 `thinking.type` 字段。
+            // 引擎契约里的 sentinel 字符串 "none" 表示「关闭思考模式」——必须
+            // 翻译成 `thinking.type=disabled`，直接发 `reasoning_effort="none"`
+            // 会被服务端忽略或拒收（此前 forced_tool → "none" 路径即踩此坑）。
+            if effort == "none" {
+                body["thinking"] = json!({"type": "disabled"});
+            } else {
+                body["reasoning_effort"] = json!(effort);
+                // 显式发 enabled 便于不依赖端点默认（deepseek-v4-flash 默认即开，
+                // 但部分代理/中间层不读默认，显式声明更稳）。
+                body["thinking"] = json!({"type": "enabled"});
+            }
         }
         if let Some(fmt) = &request.response_format {
             body["response_format"] = match fmt {
@@ -315,5 +328,86 @@ mod tests {
         assert_eq!(u.output_tokens, None);
         assert_eq!(u.cached_tokens, None);
         assert_eq!(u.cache_miss_tokens, None);
+    }
+
+    /// 回归：DeepSeek / OpenAI Chat Completions 兼容端协议——
+    /// "none" 必须映射为 `thinking.type=disabled`，不是直接发
+    /// `reasoning_effort="none"`（后者在 OpenAI 格式下是非法值，
+    /// DeepSeek 会忽略或拒收）。
+    #[test]
+    fn build_body_none_maps_to_thinking_disabled() {
+        use crate::message::Message;
+        use crate::model::ModelKind;
+        let svc = ChatCompletionsModelService::new(
+            "https://x.example/v1".into(),
+            "sk-x".into(),
+            "deepseek-v4-flash".into(),
+            4096,
+        );
+        let req = ModelRequest {
+            model: ModelKind::Main,
+            messages: vec![Message::user("hi")],
+            tools: None,
+            reasoning_effort: Some("none".into()),
+            response_format: None,
+            tool_choice: None,
+        };
+        let body = svc.build_body(&req);
+        assert_eq!(body["thinking"]["type"], "disabled");
+        assert!(
+            body.get("reasoning_effort").is_none(),
+            "禁用 thinking 时不应发 reasoning_effort 字段"
+        );
+    }
+
+    /// 回归：非 "none" 强度必须显式发 `thinking.type=enabled` + `reasoning_effort`。
+    #[test]
+    fn build_body_effort_sets_thinking_enabled_and_effort() {
+        use crate::message::Message;
+        use crate::model::ModelKind;
+        let svc = ChatCompletionsModelService::new(
+            "https://x.example/v1".into(),
+            "sk-x".into(),
+            "deepseek-v4-flash".into(),
+            4096,
+        );
+        for effort in ["low", "high", "max"] {
+            let req = ModelRequest {
+                model: ModelKind::Main,
+                messages: vec![Message::user("hi")],
+                tools: None,
+                reasoning_effort: Some(effort.into()),
+                response_format: None,
+                tool_choice: None,
+            };
+            let body = svc.build_body(&req);
+            assert_eq!(body["thinking"]["type"], "enabled", "effort={effort}");
+            assert_eq!(body["reasoning_effort"], effort, "effort={effort}");
+        }
+    }
+
+    /// 回归：不设 reasoning_effort 时不应发 thinking 字段——
+    /// 让端点按模型默认处理（DeepSeek V4 默认开 + high）。
+    #[test]
+    fn build_body_no_effort_omits_thinking_field() {
+        use crate::message::Message;
+        use crate::model::ModelKind;
+        let svc = ChatCompletionsModelService::new(
+            "https://x.example/v1".into(),
+            "sk-x".into(),
+            "deepseek-v4-flash".into(),
+            4096,
+        );
+        let req = ModelRequest {
+            model: ModelKind::Main,
+            messages: vec![Message::user("hi")],
+            tools: None,
+            reasoning_effort: None,
+            response_format: None,
+            tool_choice: None,
+        };
+        let body = svc.build_body(&req);
+        assert!(body.get("thinking").is_none());
+        assert!(body.get("reasoning_effort").is_none());
     }
 }
